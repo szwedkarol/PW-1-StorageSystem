@@ -7,6 +7,7 @@
  */
 package cp2023.solution;
 
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import cp2023.base.ComponentId;
@@ -27,7 +28,13 @@ public class StorageSystemImplementation implements StorageSystem {
 
     private final ConcurrentHashMap<DeviceId, Integer> deviceTotalSlots;
     private ConcurrentHashMap<ComponentId, DeviceId> componentPlacement;
-    private ConcurrentHashMap<ComponentId, Boolean> isComponentTransferred;
+
+
+    //private Set<Pair<ComponentId, Boolean> isComponentTransferred; // maybe correct?
+
+    // private set of pairs (component, boolean) - true if component is transferred, false otherwise.
+    private Map<ComponentId, Boolean>> isComponentTransferred; // TODO: change the type in code (or in this declaration).
+
 
     public StorageSystemImplementation(ConcurrentHashMap<DeviceId, Integer> deviceTotalSlots,
                                        ConcurrentHashMap<ComponentId, DeviceId> componentPlacement) {
