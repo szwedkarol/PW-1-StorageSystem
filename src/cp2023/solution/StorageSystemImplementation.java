@@ -7,15 +7,11 @@
  */
 package cp2023.solution;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 
-import cp2023.base.ComponentId;
-import cp2023.base.ComponentTransfer;
-import cp2023.base.DeviceId;
-import cp2023.base.StorageSystem;
+import cp2023.base.*;
 import cp2023.exceptions.*;
 
 public class StorageSystemImplementation implements StorageSystem {
@@ -25,14 +21,18 @@ public class StorageSystemImplementation implements StorageSystem {
         ADD, REMOVE, MOVE
     }
 
-    // Mutex for checking exceptions.
-    private final Semaphore checkIfAllowed = new Semaphore(1, true);
+    // Mutex for operating on a transfer.
+    // Only prepare() and perform() methods will be run in parallel.
+    private final Semaphore transferOperation = new Semaphore(1, true);
 
-    private final HashMap<DeviceId, Integer> deviceTotalSlots;
-    private HashMap<ComponentId, DeviceId> componentPlacement;
+    private final HashMap<DeviceId, Integer> deviceTotalSlots; // Capacity of each device.
+    private HashMap<ComponentId, DeviceId> componentPlacement; // Current placement of each component.
+    private HashMap<DeviceId, Integer> deviceTakenSlots; // Number of slots taken up by components on each device.
 
     // Set of pairs (component, boolean) - true if component is transferred, false otherwise.
     private HashMap<ComponentId, Boolean> isComponentTransferred;
+
+
 
 
     public StorageSystemImplementation(HashMap<DeviceId, Integer> deviceTotalSlots,
@@ -40,10 +40,21 @@ public class StorageSystemImplementation implements StorageSystem {
         this.deviceTotalSlots = deviceTotalSlots;
         this.componentPlacement = componentPlacement;
 
-        // Initialize isComponentTransferred map - all components are not transferred.
+        // Initialize isComponentTransferred map - at the beginning all components are not transferred.
         this.isComponentTransferred = new HashMap<>();
         for (ComponentId component : componentPlacement.keySet()) {
             this.isComponentTransferred.put(component, false);
+        }
+
+        // Initialize deviceTakenSlots map using componentPlacement map.
+        this.deviceTakenSlots = new HashMap<>();
+        for (Map.Entry<ComponentId, DeviceId> entry : componentPlacement.entrySet()) {
+            DeviceId device = entry.getValue();
+            if (deviceTakenSlots.containsKey(device)) {
+                deviceTakenSlots.put(device, deviceTakenSlots.get(device) + 1);
+            } else {
+                deviceTakenSlots.put(device, 1);
+            }
         }
 
     }
@@ -57,6 +68,14 @@ public class StorageSystemImplementation implements StorageSystem {
 
         // Assign a transfer type.
         TransferType transferType = assignTransferType(transfer);
+
+        try {
+            transferOperation.acquire();
+        } catch (InterruptedException e) {
+            // Exception thrown per project specification.
+            throw new RuntimeException("panic: unexpected thread interruption");
+        }
+
 
         // Check if source device exists.
         DeviceId source = transfer.getSourceDeviceId();
@@ -95,8 +114,35 @@ public class StorageSystemImplementation implements StorageSystem {
             throw new ComponentIsBeingOperatedOn(component);
         }
 
+        // End of checking the arguments of componentTransfer and basic legality of the operation on a component.
+
+        // Look for a cycle withing graph of transfers.
+
     }
 
+
+    /*
+     * Returns a list of transfers that form a cycle.
+     *
+     * INPUT: Transfer (MOVE) that is being executed.
+     * FUNCTION: Checks if there is a cycle in the graph of transfers. Uses DFS algorithm.
+     * OUTPUT: List of transfers that form a cycle. If there is no cycle, returns empty list.
+     */
+    private LinkedList<ComponentTransfer> cycleOfTransfers(ComponentTransfer transfer) {
+        LinkedList<ComponentTransfer> cycle = new LinkedList<>();
+
+
+        return cycle;
+    }
+
+
+    /*
+     * Assigns a transfer type to a component transfer.
+     * INPUT: ComponentTransfer object.
+     * FUNCTION: Checks if the transfer is an ADD/REMOVE/MOVE operation using getSourceDeviceID() and
+     * getDestinationDeviceID() methods.
+     * OUTPUT: TransferType enum - ADD/REMOVE/MOVE.
+     */
     private TransferType assignTransferType(ComponentTransfer transfer) {
         // IllegalTransferType is checked for in execute() method.
         if (transfer.getSourceDeviceId() == null && transfer.getDestinationDeviceId() != null) {
