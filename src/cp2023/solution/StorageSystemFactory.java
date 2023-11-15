@@ -8,6 +8,7 @@
  */
 package cp2023.solution;
 
+import java.util.HashMap;
 import java.util.Map;
 
 import cp2023.base.ComponentId;
@@ -26,7 +27,7 @@ public final class StorageSystemFactory {
             throw new IllegalArgumentException("Arguments cannot be null.");
         }
 
-        // This also tests, if there are devices without number of slots provided.
+        // Tests, if there are devices without number of slots provided.
         for (Map.Entry<DeviceId, Integer> entry : deviceTotalSlots.entrySet()) {
             if (entry.getKey() == null || entry.getValue() == null) {
                 throw new IllegalArgumentException("Map deviceTotalSlots cannot contain null values.");
@@ -67,8 +68,8 @@ public final class StorageSystemFactory {
         }
 
         return new StorageSystemImplementation(
-                new java.util.concurrent.ConcurrentHashMap<>(deviceTotalSlots),
-                new java.util.concurrent.ConcurrentHashMap<>(componentPlacement)
+                new HashMap<>(deviceTotalSlots),
+                new HashMap<>(componentPlacement)
         );
     }
 

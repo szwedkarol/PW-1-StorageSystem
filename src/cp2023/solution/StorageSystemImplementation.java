@@ -7,17 +7,16 @@
  */
 package cp2023.solution;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Semaphore;
 
 import cp2023.base.ComponentId;
 import cp2023.base.ComponentTransfer;
 import cp2023.base.DeviceId;
 import cp2023.base.StorageSystem;
-import cp2023.exceptions.ComponentAlreadyExists;
-import cp2023.exceptions.DeviceDoesNotExist;
-import cp2023.exceptions.IllegalTransferType;
-import cp2023.exceptions.TransferException;
+import cp2023.exceptions.*;
 
 public class StorageSystemImplementation implements StorageSystem {
 
@@ -26,23 +25,23 @@ public class StorageSystemImplementation implements StorageSystem {
         ADD, REMOVE, MOVE
     }
 
-    private final ConcurrentHashMap<DeviceId, Integer> deviceTotalSlots;
-    private ConcurrentHashMap<ComponentId, DeviceId> componentPlacement;
+    // Mutex for checking exceptions.
+    private final Semaphore checkIfAllowed = new Semaphore(1, true);
+
+    private final HashMap<DeviceId, Integer> deviceTotalSlots;
+    private HashMap<ComponentId, DeviceId> componentPlacement;
+
+    // Set of pairs (component, boolean) - true if component is transferred, false otherwise.
+    private HashMap<ComponentId, Boolean> isComponentTransferred;
 
 
-    //private Set<Pair<ComponentId, Boolean> isComponentTransferred; // maybe correct?
-
-    // private set of pairs (component, boolean) - true if component is transferred, false otherwise.
-    private Map<ComponentId, Boolean>> isComponentTransferred; // TODO: change the type in code (or in this declaration).
-
-
-    public StorageSystemImplementation(ConcurrentHashMap<DeviceId, Integer> deviceTotalSlots,
-                                       ConcurrentHashMap<ComponentId, DeviceId> componentPlacement) {
+    public StorageSystemImplementation(HashMap<DeviceId, Integer> deviceTotalSlots,
+                                       HashMap<ComponentId, DeviceId> componentPlacement) {
         this.deviceTotalSlots = deviceTotalSlots;
         this.componentPlacement = componentPlacement;
 
         // Initialize isComponentTransferred map - all components are not transferred.
-        this.isComponentTransferred = new ConcurrentHashMap<>();
+        this.isComponentTransferred = new HashMap<>();
         for (ComponentId component : componentPlacement.keySet()) {
             this.isComponentTransferred.put(component, false);
         }
@@ -71,10 +70,29 @@ public class StorageSystemImplementation implements StorageSystem {
             throw new DeviceDoesNotExist(destination);
         }
 
-        // Check if component exists.
+        // Check if component exists on the destination device.
         ComponentId component = transfer.getComponentId();
-        if (!isComponentTransferred.containsKey(component)) {
-            throw new ComponentAlreadyExists(component);
+        if (transferType == TransferType.ADD && componentPlacement.get(component) == destination) {
+            assert destination != null; // TransferType must be ADD
+            throw new ComponentAlreadyExists(component, destination);
+        }
+
+        // Check if component is moved from device to the same device.
+        if (transferType == TransferType.MOVE && source == destination) {
+            assert source != null; // TransferType must be MOVE
+            throw new ComponentDoesNotNeedTransfer(component, source);
+        }
+
+        // Check if component exists on the source device for MOVE or REMOVE operations.
+        if ((transferType == TransferType.MOVE || transferType == TransferType.REMOVE)
+                && componentPlacement.get(component) != source) {
+            assert source != null; // TransferType must be MOVE or REMOVE
+            throw new ComponentDoesNotExist(component, source);
+        }
+
+        // Check if component is already being transferred.
+        if (isComponentTransferred.get(component)) {
+            throw new ComponentIsBeingOperatedOn(component);
         }
 
     }
