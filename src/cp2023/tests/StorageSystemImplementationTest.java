@@ -21,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 public class StorageSystemImplementationTest {
 
+/* TO RUN THE TESTS, MAKE DFS() PUBLIC IN THE TransfersGraph.java FILE
     @Test
     public void dfsReturnsFalseWhenNoCycleInGraph() {
         // Create a TransfersGraph instance
@@ -84,46 +85,7 @@ public class StorageSystemImplementationTest {
         assertTrue(deviceNodesCycle.contains(graph.getDeviceNode(device2)));
         assertTrue(deviceNodesCycle.contains(graph.getDeviceNode(device3)));
     }
-
-
-
-/*
-    // This version of the test is not needed anymore, because the dfs() now works differently (returns list of
-    // DeviceNode objects that make up a cycle).
-    @Test
-    public void testCycleOfTransfers() {
-        // Create a TransfersGraph instance
-        LinkedList<DeviceId> devices = new LinkedList<>();
-        DeviceId device1 = new DeviceId(1);
-        DeviceId device2 = new DeviceId(2);
-        DeviceId device3 = new DeviceId(3);
-        devices.add(device1);
-        devices.add(device2);
-        devices.add(device3);
-        TransfersGraph graph = new TransfersGraph(devices);
-
-        // Add edges (transfers) to the graph to form a cycle
-        ComponentId component1 = new ComponentId(101);
-        ComponentId component2 = new ComponentId(102);
-        ComponentId component3 = new ComponentId(103);
-        ComponentTransfer transfer1 = new ComponentTransferImplementation(component1, device1, device2);
-        ComponentTransfer transfer2 = new ComponentTransferImplementation(component2, device2, device3);
-        ComponentTransfer transfer3 = new ComponentTransferImplementation(component3, device3, device1);
-        graph.addEdge(transfer1);
-        graph.addEdge(transfer2);
-        graph.addEdge(transfer3);
-
-        // Call the cycleOfTransfers() method with a transfer that is part of the cycle
-        LinkedList<ComponentTransfer> cycle = graph.cycleOfTransfers(transfer1);
-
-        // Assert that the returned list contains the correct sequence of transfers that form the cycle
-        assertEquals(3, cycle.size());
-        assertTrue(cycle.contains(transfer1));
-        assertTrue(cycle.contains(transfer2));
-        assertTrue(cycle.contains(transfer3));
-    }
 */
-
 
     @Test
     public void testDeviceTakenSlotsInitialization() throws NoSuchFieldException, IllegalAccessException {

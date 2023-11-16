@@ -95,7 +95,7 @@ public class TransfersGraph {
      * RETURNS TRUE IF THERE IS A CYCLE, FALSE OTHERWISE.
      * SIDE EFFECT: if there is a cycle, "deviceNodesCycle" list is filled with nodes that form a cycle.
      */
-    public boolean dfs(DeviceNode start, LinkedList<DeviceNode> deviceNodesCycle) {
+    private boolean dfs(DeviceNode start, LinkedList<DeviceNode> deviceNodesCycle) {
         HashMap<DeviceNode, Boolean> visited = new HashMap<>();
         HashMap<DeviceNode, DeviceNode> parent = new HashMap<>();
         LinkedList<DeviceNode> stack = new LinkedList<>();
