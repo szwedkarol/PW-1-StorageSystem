@@ -32,7 +32,7 @@ public class StorageSystemImplementation implements StorageSystem {
     // Set of pairs (component, boolean) - true if component is transferred, false otherwise.
     private HashMap<ComponentId, Boolean> isComponentTransferred;
 
-
+    private TransfersGraph graph; // Directed graph of MOVE transfers.
 
 
     public StorageSystemImplementation(HashMap<DeviceId, Integer> deviceTotalSlots,
@@ -57,6 +57,8 @@ public class StorageSystemImplementation implements StorageSystem {
             }
         }
 
+        // Initialize graph of transfers.
+        this.graph = new TransfersGraph(new LinkedList<>(deviceTotalSlots.keySet()));
     }
 
     @Override
@@ -119,22 +121,6 @@ public class StorageSystemImplementation implements StorageSystem {
         // Look for a cycle withing graph of transfers.
 
     }
-
-
-    /*
-     * Returns a list of transfers that form a cycle.
-     *
-     * INPUT: Transfer (MOVE) that is being executed.
-     * FUNCTION: Checks if there is a cycle in the graph of transfers. Uses DFS algorithm.
-     * OUTPUT: List of transfers that form a cycle. If there is no cycle, returns empty list.
-     */
-    private LinkedList<ComponentTransfer> cycleOfTransfers(ComponentTransfer transfer) {
-        LinkedList<ComponentTransfer> cycle = new LinkedList<>();
-
-
-        return cycle;
-    }
-
 
     /*
      * Assigns a transfer type to a component transfer.
