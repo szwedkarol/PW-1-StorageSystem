@@ -10,6 +10,7 @@ package cp2023.solution;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import cp2023.base.*;
 import cp2023.exceptions.*;
@@ -27,7 +28,7 @@ public class StorageSystemImplementation implements StorageSystem {
 
     private final HashMap<DeviceId, Integer> deviceTotalSlots; // Capacity of each device.
     private HashMap<ComponentId, DeviceId> componentPlacement; // Current placement of each component.
-    private HashMap<DeviceId, Integer> deviceTakenSlots; // Number of slots taken up by components on each device.
+    private ConcurrentHashMap<DeviceId, AtomicInteger> deviceTakenSlots; // Number of slots taken up by components on each device.
 
     // Set of pairs (component, boolean) - true if component is transferred, false otherwise.
     private HashMap<ComponentId, Boolean> isComponentTransferred;
@@ -47,18 +48,28 @@ public class StorageSystemImplementation implements StorageSystem {
         }
 
         // Initialize deviceTakenSlots map using componentPlacement map.
-        this.deviceTakenSlots = new HashMap<>();
+        this.deviceTakenSlots = new ConcurrentHashMap<>();
         for (Map.Entry<ComponentId, DeviceId> entry : componentPlacement.entrySet()) {
             DeviceId device = entry.getValue();
             if (deviceTakenSlots.containsKey(device)) {
-                deviceTakenSlots.put(device, deviceTakenSlots.get(device) + 1);
+                deviceTakenSlots.get(device).incrementAndGet();
             } else {
-                deviceTakenSlots.put(device, 1);
+                AtomicInteger slots = new AtomicInteger(1);
+                deviceTakenSlots.put(device, slots);
             }
         }
 
         // Initialize graph of transfers.
         this.graph = new TransfersGraph(new LinkedList<>(deviceTotalSlots.keySet()));
+    }
+
+    private void acquire_semaphore(Semaphore semaphore) {
+        try {
+            semaphore.acquire();
+        } catch (InterruptedException e) {
+            // Exception thrown per project specification.
+            throw new RuntimeException("panic: unexpected thread interruption");
+        }
     }
 
     @Override
@@ -71,13 +82,7 @@ public class StorageSystemImplementation implements StorageSystem {
         // Assign a transfer type.
         TransferType transferType = assignTransferType(transfer);
 
-        try {
-            transferOperation.acquire();
-        } catch (InterruptedException e) {
-            // Exception thrown per project specification.
-            throw new RuntimeException("panic: unexpected thread interruption");
-        }
-
+        acquire_semaphore(transferOperation); // Acquire the mutex.
 
         // Check if source device exists.
         DeviceId source = transfer.getSourceDeviceId();
@@ -116,7 +121,29 @@ public class StorageSystemImplementation implements StorageSystem {
             throw new ComponentIsBeingOperatedOn(component);
         }
 
+        // Update isComponentTransferred map.
+        isComponentTransferred.put(component, true);
+
         // End of checking the arguments of componentTransfer and basic legality of the operation on a component.
+
+        // REMOVE transfer if its legal, it is performed immediately. (It is always allowed.)
+        if (transferType == TransferType.REMOVE) {
+            transferOperation.release(); // Release the mutex.
+
+            transfer.prepare();
+            transfer.perform();
+
+            acquire_semaphore(transferOperation); // Acquire the mutex.
+
+            componentPlacement.remove(component); // Remove component from componentPlacement map.
+            deviceTakenSlots.get(source).decrementAndGet(); // Decrement number of slots taken up by components.
+            isComponentTransferred.put(component, false); // Update isComponentTransferred map.
+
+            transferOperation.release(); // Release the mutex.
+
+            return;
+        }
+
 
         // Look for a cycle withing graph of transfers.
 
