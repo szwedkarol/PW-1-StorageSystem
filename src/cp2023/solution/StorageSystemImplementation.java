@@ -22,6 +22,12 @@ public class StorageSystemImplementation implements StorageSystem {
         ADD, REMOVE, MOVE
     }
 
+    // Enum for transfer phase - LEGAL/PREPARE_STARTS/PREPARE_ENDED/PERFORM_ENDED.
+    public enum TransferPhase {
+        // LEGAL - transfer did not throw any exceptions.
+        LEGAL, PREPARE_STARTS, PREPARE_ENDED, PERFORM_ENDED
+    }
+
     // Mutex for operating on a transfer.
     // Only prepare() and perform() methods will be run in parallel.
     private final Semaphore transferOperation = new Semaphore(1, true);
@@ -33,6 +39,8 @@ public class StorageSystemImplementation implements StorageSystem {
     // Set of pairs (component, boolean) - true if component is transferred, false otherwise.
     private HashMap<ComponentId, Boolean> isComponentTransferred;
 
+    private ConcurrentHashMap<ComponentTransfer, TransferPhase> componentTransferPhase; // Phase of each component transfer.
+
     private TransfersGraph graph; // Directed graph of MOVE transfers.
 
 
@@ -40,6 +48,7 @@ public class StorageSystemImplementation implements StorageSystem {
                                        HashMap<ComponentId, DeviceId> componentPlacement) {
         this.deviceTotalSlots = deviceTotalSlots;
         this.componentPlacement = componentPlacement;
+        this.componentTransferPhase = new ConcurrentHashMap<>();
 
         // Initialize isComponentTransferred map - at the beginning all components are not transferred.
         this.isComponentTransferred = new HashMap<>();
@@ -124,26 +133,65 @@ public class StorageSystemImplementation implements StorageSystem {
         // Update isComponentTransferred map.
         isComponentTransferred.put(component, true);
 
+        // Update componentTransferPhase map - transfer is currently LEGAL.
+        componentTransferPhase.put(transfer, TransferPhase.LEGAL);
+
         // End of checking the arguments of componentTransfer and basic legality of the operation on a component.
 
         // REMOVE transfer if its legal, it is performed immediately. (It is always allowed.)
         if (transferType == TransferType.REMOVE) {
             transferOperation.release(); // Release the mutex.
 
+            componentTransferPhase.put(transfer, TransferPhase.PREPARE_STARTS);
             transfer.prepare();
+            componentTransferPhase.put(transfer, TransferPhase.PREPARE_ENDED);
             transfer.perform();
+            componentTransferPhase.put(transfer, TransferPhase.PERFORM_ENDED);
 
             acquire_semaphore(transferOperation); // Acquire the mutex.
 
-            componentPlacement.remove(component); // Remove component from componentPlacement map.
+            // Component is removed from the system
+            componentPlacement.remove(component);
             deviceTakenSlots.get(source).decrementAndGet(); // Decrement number of slots taken up by components.
-            isComponentTransferred.put(component, false); // Update isComponentTransferred map.
+            isComponentTransferred.remove(component);
+            componentTransferPhase.remove(transfer);
 
             transferOperation.release(); // Release the mutex.
 
-            return;
+            return; // REMOVE transfer is finished.
         }
 
+        // If there is free space on the destination device, ADD/MOVE transfer starts.
+        if (deviceTakenSlots.get(destination).get() < deviceTotalSlots.get(destination)) {
+            transferOperation.release(); // Release the mutex.
+
+            componentTransferPhase.put(transfer, TransferPhase.PREPARE_STARTS);
+            transfer.prepare();
+            componentTransferPhase.put(transfer, TransferPhase.PREPARE_ENDED);
+            transfer.perform();
+            componentTransferPhase.put(transfer, TransferPhase.PERFORM_ENDED);
+
+            acquire_semaphore(transferOperation); // Acquire the mutex.
+
+            if (transferType == TransferType.MOVE) {
+                // Update data structures for source device.
+                componentPlacement.remove(component);
+                deviceTakenSlots.get(source).decrementAndGet();
+                graph.removeEdge(transfer); // TODO: Check behaviour, if transfer was never waiting for execution
+                                            // that is, what's the behaviour for transfers never added to the graph
+            }
+
+            // Steps that are identical for MOVE and ADD
+
+            componentPlacement.put(component, destination);
+            deviceTakenSlots.get(destination).incrementAndGet();
+            isComponentTransferred.put(component, false);
+            componentTransferPhase.remove(transfer);
+
+            transferOperation.release(); // Release the mutex.
+
+            return; // ADD or MOVE transfer is finished - case of enough space on destination device.
+        }
 
         // Look for a cycle withing graph of transfers.
 
