@@ -9,6 +9,8 @@ package cp2023.solution;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -41,6 +43,19 @@ public class StorageSystemImplementation implements StorageSystem {
 
     private ConcurrentHashMap<ComponentTransfer, TransferPhase> componentTransferPhase; // Phase of each component transfer.
 
+    // Queues for transfers waiting for space on each device.
+    private ConcurrentHashMap<DeviceId, ConcurrentLinkedQueue<ComponentTransfer>> deviceQueues;
+
+    /*
+     * transferPhaseLatches hashmap will be updated when component transfer is inserted into the deviceQueue,
+     * so transfers that do not have to wait for free space on destination device will never be put into this hashmap.
+     *
+     * ArrayList of latches for each ComponentTransfer will be of size 2.
+     * First latch is released, when component transfer can call prepare().
+     * Second latch is release, when component transfer can call perform().
+     */
+    private ConcurrentHashMap<ComponentTransfer, ArrayList<CountDownLatch>> transferPhaseLatches;
+
     private TransfersGraph graph; // Directed graph of MOVE transfers.
 
 
@@ -49,6 +64,7 @@ public class StorageSystemImplementation implements StorageSystem {
         this.deviceTotalSlots = deviceTotalSlots;
         this.componentPlacement = componentPlacement;
         this.componentTransferPhase = new ConcurrentHashMap<>();
+        this.transferPhaseLatches = new ConcurrentHashMap<>();
 
         // Initialize isComponentTransferred map - at the beginning all components are not transferred.
         this.isComponentTransferred = new HashMap<>();
@@ -68,6 +84,12 @@ public class StorageSystemImplementation implements StorageSystem {
             }
         }
 
+        // Initialize deviceQueues
+        this.deviceQueues = new ConcurrentHashMap<>();
+        for (DeviceId device : deviceTotalSlots.keySet()) {
+            deviceQueues.put(device, new ConcurrentLinkedQueue<>());
+        }
+
         // Initialize graph of transfers.
         this.graph = new TransfersGraph(new LinkedList<>(deviceTotalSlots.keySet()));
     }
@@ -79,6 +101,14 @@ public class StorageSystemImplementation implements StorageSystem {
             // Exception thrown per project specification.
             throw new RuntimeException("panic: unexpected thread interruption");
         }
+    }
+
+    private void init_transferPhaseLatch(ComponentTransfer transfer) {
+        ArrayList<CountDownLatch> latches = new ArrayList<>();
+        latches.add(0, new CountDownLatch(1)); // prepare() latch
+        latches.add(1, new CountDownLatch(1)); // perform latch
+
+        transferPhaseLatches.put(transfer, latches);
     }
 
     @Override
@@ -192,6 +222,11 @@ public class StorageSystemImplementation implements StorageSystem {
 
             return; // ADD or MOVE transfer is finished - case of enough space on destination device.
         }
+
+        // Now we have to write code for executing transfer, when there is not enough space on the destination device
+        // and transfer type is ADD/MOVE
+
+        // Add transfer to the waiting queue of the destination device
 
         // Look for a cycle withing graph of transfers.
 
