@@ -24,19 +24,16 @@ public class StorageSystemImplementation implements StorageSystem {
         ADD, REMOVE, MOVE
     }
 
-    // TODO: Likely deprecated - to be (safely) deleted
-    // Enum for transfer phase - LEGAL/PREPARE_STARTS/PREPARE_ENDED/PERFORM_ENDED.
+    /*
+     * Enum for transfer phase latches - PREPARE/PERFORM.
+     * PREPARE - transfer can call prepare().
+     * PERFORM - transfer can call perform().
+     */
     public enum TransferPhase {
-        // LEGAL - transfer did not throw any exceptions.
-        LEGAL, PREPARE_STARTS, PREPARE_ENDED, PERFORM_ENDED
-    }
-
-    // TODO: Rename to TransferPhase after removing deprecated enum
-    public enum LatchPhase {
         PREPARE, PERFORM
     }
 
-    // Mutex for operating on a transfer.
+    // Mutex for operating on a transfer and checking if it is legal.
     // Only prepare() and perform() methods will be run in parallel.
     private final Semaphore transferOperation = new Semaphore(1, true);
 
@@ -62,7 +59,7 @@ public class StorageSystemImplementation implements StorageSystem {
      * PREPARE latch is released, when component transfer can call prepare().
      * PERFORM latch is release, when component transfer can call perform().
      */
-    private final ConcurrentHashMap<ComponentTransfer, EnumMap<LatchPhase, CountDownLatch>> transferPhaseLatches;
+    private final ConcurrentHashMap<ComponentTransfer, EnumMap<TransferPhase, CountDownLatch>> transferPhaseLatches;
 
     private final TransfersGraph graph; // Directed graph of MOVE transfers.
 
@@ -120,9 +117,9 @@ public class StorageSystemImplementation implements StorageSystem {
      * OUTPUT: No explicit output. The function modifies the 'transferPhaseLatches' map as a side effect.
      */
     private void init_transferPhaseLatch(ComponentTransfer transfer) {
-        EnumMap<LatchPhase, CountDownLatch> latches = new EnumMap<>(LatchPhase.class);
-        latches.put(LatchPhase.PREPARE, new CountDownLatch(1));
-        latches.put(LatchPhase.PERFORM, new CountDownLatch(1));
+        EnumMap<TransferPhase, CountDownLatch> latches = new EnumMap<>(TransferPhase.class);
+        latches.put(TransferPhase.PREPARE, new CountDownLatch(1));
+        latches.put(TransferPhase.PERFORM, new CountDownLatch(1));
 
         transferPhaseLatches.put(transfer, latches);
     }
@@ -183,10 +180,18 @@ public class StorageSystemImplementation implements StorageSystem {
 
         // REMOVE transfer if its legal, it is performed immediately. (It is always allowed.)
         if (transferType == TransferType.REMOVE) {
+            ComponentTransfer transferWaitingForMe = deviceQueues.get(source).poll();
+            if (transferWaitingForMe != null) waitsFor.put(transfer, transferWaitingForMe);
+
             transferOperation.release(); // Release the mutex.
 
-            // TODO: Search for transfers waiting to happen inside deviceQueues
+            if (transferWaitingForMe != null)
+                transferPhaseLatches.get(transferWaitingForMe).get(TransferPhase.PREPARE).countDown();
+
             transfer.prepare();
+
+            if (transferWaitingForMe != null)
+                transferPhaseLatches.get(transferWaitingForMe).get(TransferPhase.PERFORM).countDown();
 
             transfer.perform();
 
@@ -203,14 +208,31 @@ public class StorageSystemImplementation implements StorageSystem {
             return; // REMOVE transfer is finished.
         }
 
+        // TODO: REMOVE AND ADD/MOVE program flows (when transfer does not have to wait in any queue) are very similar
+        // they can likely be put inside single 'if' statement (+ new method for updating maps)
+
         // If there is free space on the destination device, ADD/MOVE transfer starts.
         if (deviceTakenSlots.get(destination).get() < deviceTotalSlots.get(destination)) {
             deviceTakenSlots.get(destination).incrementAndGet(); // prevents race condition
+
+            ComponentTransfer transferWaitingForMe = null;
+            if (transferType == TransferType.MOVE) {
+                // We are freeing space on source device, so transfer waiting in the queue may start.
+                transferWaitingForMe = deviceQueues.get(source).poll();
+                if (transferWaitingForMe != null) waitsFor.put(transfer, transferWaitingForMe);
+            }
+
             transferOperation.release(); // Release the mutex.
 
 
+            if (transferWaitingForMe != null)
+                transferPhaseLatches.get(transferWaitingForMe).get(TransferPhase.PREPARE).countDown();
+
             transfer.prepare();
-            // TODO: DOES ANYTHING HAVE TO HAPPEN HERE?
+
+            if (transferWaitingForMe != null)
+                transferPhaseLatches.get(transferWaitingForMe).get(TransferPhase.PERFORM).countDown();
+
             transfer.perform();
 
 
@@ -235,7 +257,7 @@ public class StorageSystemImplementation implements StorageSystem {
         // Now we have to write code for executing transfer, when there is not enough space on the destination device
         // and transfer type is ADD/MOVE
 
-        // TODO: Where transfers will wait on latches?
+        // Where transfers will wait on latches? Answer: just before they call prepare() and perform() respectively,
         init_transferPhaseLatch(transfer); // Initialize latches for transfer
         deviceQueues.get(destination).add(transfer); // Add transfer to the waiting queue of the destination device
 
@@ -252,26 +274,24 @@ public class StorageSystemImplementation implements StorageSystem {
 
                 // Call prepare() in all transfers in a cycle
                 for (ComponentTransfer cycle_transfer : cycle) {
-                    // TODO: Transfer that is closing the cycle cannot wait on the latch as there may not be any
-                    // other thread to wake him up
                     assert transferPhaseLatches.containsKey(cycle_transfer);
-                    transferPhaseLatches.get(cycle_transfer).get(LatchPhase.PREPARE).countDown(); // Latch for prepare()
 
-                    // TODO: Finish program flow for cycles
+                    // Transfer that starts the cycle calls countDown() on its own PREPARE latch.
+                    transferPhaseLatches.get(cycle_transfer).get(TransferPhase.PREPARE).countDown(); // Latch for prepare()
+
+                    // TODO: Does anything more need to happen here?
                 }
             }
         }
 
-        // TODO: "You cannot call prepare() on the place being freed by transfer X and then call perform() on the place of transfer Y."
-
         transferOperation.release();
 
-        awaitLatch(transferPhaseLatches.get(transfer).get(LatchPhase.PREPARE)); // waits on latch before calling prepare()
+        awaitLatch(transferPhaseLatches.get(transfer).get(TransferPhase.PREPARE)); // waits on latch before calling prepare()
 
         // Transfer waiting for us can call prepare()
         ComponentTransfer whoWaitsForMe = waitsFor.get(transfer);
         if (whoWaitsForMe != null) {
-            transferPhaseLatches.get(whoWaitsForMe).get(LatchPhase.PREPARE).countDown();
+            transferPhaseLatches.get(whoWaitsForMe).get(TransferPhase.PREPARE).countDown();
         }
 
         transfer.prepare();
@@ -280,14 +300,20 @@ public class StorageSystemImplementation implements StorageSystem {
 
         // Transfer waiting for us can call perform()
         if (whoWaitsForMe != null) {
-            transferPhaseLatches.get(whoWaitsForMe).get(LatchPhase.PERFORM).countDown();
+            transferPhaseLatches.get(whoWaitsForMe).get(TransferPhase.PERFORM).countDown();
         }
 
-        awaitLatch(transferPhaseLatches.get(transfer).get(LatchPhase.PERFORM)); // waits on latch before calling perform()
+        awaitLatch(transferPhaseLatches.get(transfer).get(TransferPhase.PERFORM)); // waits on latch before calling perform()
+
+        transfer.perform();
+
+        isComponentTransferred.put(component, false);
+
+        // TODO: What needs to happen now?
 
 
 
-    }
+    } // End of execute()
 
     // TODO: (Maybe) Create method for updating maps instead of copying code
 
