@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import cp2023.base.*;
 import cp2023.exceptions.*;
+import cp2023.solution.TransfersGraph;
 
 public class StorageSystemImplementation implements StorageSystem {
 
@@ -46,6 +47,10 @@ public class StorageSystemImplementation implements StorageSystem {
     // Queues for transfers waiting for space on each device.
     private ConcurrentHashMap<DeviceId, ConcurrentLinkedQueue<ComponentTransfer>> deviceQueues;
 
+    // "You cannot call prepare() on the place being freed by transfer X and then call perform() on the place of transfer Y."
+    // Key has to wait for transfer Value to finish its phases (prepare()/perform()).
+    private ConcurrentHashMap<ComponentTransfer, ComponentTransfer> waitsFor;
+
     /*
      * transferPhaseLatches hashmap will be updated when component transfer is inserted into the deviceQueue,
      * so transfers that do not have to wait for free space on destination device will never be put into this hashmap.
@@ -65,6 +70,7 @@ public class StorageSystemImplementation implements StorageSystem {
         this.componentPlacement = componentPlacement;
         this.componentTransferPhase = new ConcurrentHashMap<>();
         this.transferPhaseLatches = new ConcurrentHashMap<>();
+        this.waitsFor = new ConcurrentHashMap<>();
 
         // Initialize isComponentTransferred map - at the beginning all components are not transferred.
         this.isComponentTransferred = new HashMap<>();
@@ -94,6 +100,7 @@ public class StorageSystemImplementation implements StorageSystem {
         this.graph = new TransfersGraph(new LinkedList<>(deviceTotalSlots.keySet()));
     }
 
+    // semaphore.acquire() with exception handling.
     private void acquire_semaphore(Semaphore semaphore) {
         try {
             semaphore.acquire();
@@ -193,6 +200,7 @@ public class StorageSystemImplementation implements StorageSystem {
 
         // If there is free space on the destination device, ADD/MOVE transfer starts.
         if (deviceTakenSlots.get(destination).get() < deviceTotalSlots.get(destination)) {
+            deviceTakenSlots.get(destination).incrementAndGet(); // prevents race condition
             transferOperation.release(); // Release the mutex.
 
             componentTransferPhase.put(transfer, TransferPhase.PREPARE_STARTS);
@@ -207,14 +215,11 @@ public class StorageSystemImplementation implements StorageSystem {
                 // Update data structures for source device.
                 componentPlacement.remove(component);
                 deviceTakenSlots.get(source).decrementAndGet();
-                graph.removeEdge(transfer); // TODO: Check behaviour, if transfer was never waiting for execution
-                                            // that is, what's the behaviour for transfers never added to the graph
             }
 
             // Steps that are identical for MOVE and ADD
 
             componentPlacement.put(component, destination);
-            deviceTakenSlots.get(destination).incrementAndGet();
             isComponentTransferred.put(component, false);
             componentTransferPhase.remove(transfer);
 
@@ -226,10 +231,74 @@ public class StorageSystemImplementation implements StorageSystem {
         // Now we have to write code for executing transfer, when there is not enough space on the destination device
         // and transfer type is ADD/MOVE
 
-        // Add transfer to the waiting queue of the destination device
+        // TODO: Where transfers will wait on latches?
+        init_transferPhaseLatch(transfer); // Initialize latches for transfer
+        deviceQueues.get(destination).add(transfer); // Add transfer to the waiting queue of the destination device
 
-        // Look for a cycle withing graph of transfers.
+        // Program logic for MOVE transfers that have to wait in the queue
+        if (transferType == TransferType.MOVE) {
+            graph.addEdge(transfer);
 
+            // Look for a cycle withing graph of transfers.
+            ArrayList<ComponentTransfer> cycle = new ArrayList<>(graph.cycleOfTransfers(transfer));
+
+            if (!cycle.isEmpty()) {
+                // Update waitsFor map for all transfers in a cycle
+                //TODO: CALL
+
+                // Call prepare() in all transfers in a cycle
+                for (ComponentTransfer cycle_transfer : cycle) {
+                    // TODO: Transfer that is closing the cycle cannot wait on the latch as there may not be any
+                    // other thread to wake him up
+                    assert transferPhaseLatches.containsKey(cycle_transfer);
+                    transferPhaseLatches.get(cycle_transfer).get(0).countDown(); // Latch for prepare()
+
+                    // TODO: Finish program flow for cycles
+                }
+            }
+        }
+
+        // TODO: "You cannot call prepare() on the place being freed by transfer X and then call perform() on the place of transfer Y."
+
+        transferOperation.release();
+
+        awaitLatch(transferPhaseLatches.get(transfer).get(0)); // waits on latch before calling prepare()
+
+        transfer.prepare();
+
+
+
+
+
+
+    }
+
+    /*
+     * INPUT: ArrayList of ComponentTransfer objects representing a cycle in the graph of transfers.
+     * FUNCTION: Updates the 'waitsFor' map for all transfers in the cycle.
+     * For each transfer in the cycle, it sets the next transfer in the cycle as the one it waits for in 'waitsFor' map.
+     * The last transfer in the cycle waits for the first one, closing the cycle.
+     * OUTPUT: No explicit output. The function modifies the 'waitsFor' map as a side effect.
+     */
+    private void cycleTransfersWaitForUpdate(ArrayList<ComponentTransfer> cycle) {
+        int cycleSize = cycle.size();
+        for (int i = 0; i < cycleSize; i++) {
+            ComponentTransfer currentTransfer = cycle.get(i);
+
+            // Get the next transfer in the cycle, wrap around to the first element if at the end
+            ComponentTransfer nextTransfer = cycle.get((i + 1) % cycleSize);
+            waitsFor.put(currentTransfer, nextTransfer);
+        }
+    }
+
+    // latch.await() with exception handling.
+    private void awaitLatch(CountDownLatch latch) {
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            // Exception thrown per project specification.
+            throw new RuntimeException("panic: unexpected thread interruption");
+        }
     }
 
     /*
