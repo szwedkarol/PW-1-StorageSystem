@@ -47,8 +47,6 @@ public class StorageSystemImplementation implements StorageSystem {
     // Set of pairs (component, boolean) - true if component is transferred, false otherwise.
     private final HashMap<ComponentId, Boolean> isComponentTransferred;
 
-    private final ConcurrentHashMap<ComponentTransfer, TransferPhase> componentTransferPhase; // Phase of each component transfer.
-
     // Queues for transfers waiting for space on each device.
     private final ConcurrentHashMap<DeviceId, ConcurrentLinkedQueue<ComponentTransfer>> deviceQueues;
 
@@ -73,7 +71,6 @@ public class StorageSystemImplementation implements StorageSystem {
                                        HashMap<ComponentId, DeviceId> componentPlacement) {
         this.deviceTotalSlots = deviceTotalSlots;
         this.componentPlacement = componentPlacement;
-        this.componentTransferPhase = new ConcurrentHashMap<>();
         this.transferPhaseLatches = new ConcurrentHashMap<>();
         this.waitsFor = new ConcurrentHashMap<>();
 
@@ -182,20 +179,17 @@ public class StorageSystemImplementation implements StorageSystem {
         // Update isComponentTransferred map.
         isComponentTransferred.put(component, true);
 
-        // Update componentTransferPhase map - transfer is currently LEGAL.
-        componentTransferPhase.put(transfer, TransferPhase.LEGAL);
-
         // End of checking the arguments of componentTransfer and basic legality of the operation on a component.
 
         // REMOVE transfer if its legal, it is performed immediately. (It is always allowed.)
         if (transferType == TransferType.REMOVE) {
             transferOperation.release(); // Release the mutex.
 
-            componentTransferPhase.put(transfer, TransferPhase.PREPARE_STARTS);
+            // TODO: Search for transfers waiting to happen inside deviceQueues
             transfer.prepare();
-            componentTransferPhase.put(transfer, TransferPhase.PREPARE_ENDED);
+
             transfer.perform();
-            componentTransferPhase.put(transfer, TransferPhase.PERFORM_ENDED);
+
 
             acquire_semaphore(transferOperation); // Acquire the mutex.
 
@@ -203,7 +197,6 @@ public class StorageSystemImplementation implements StorageSystem {
             componentPlacement.remove(component);
             deviceTakenSlots.get(source).decrementAndGet(); // Decrement number of slots taken up by components.
             isComponentTransferred.remove(component);
-            componentTransferPhase.remove(transfer);
 
             transferOperation.release(); // Release the mutex.
 
@@ -215,11 +208,11 @@ public class StorageSystemImplementation implements StorageSystem {
             deviceTakenSlots.get(destination).incrementAndGet(); // prevents race condition
             transferOperation.release(); // Release the mutex.
 
-            componentTransferPhase.put(transfer, TransferPhase.PREPARE_STARTS);
+
             transfer.prepare();
-            componentTransferPhase.put(transfer, TransferPhase.PREPARE_ENDED);
+            // TODO: DOES ANYTHING HAVE TO HAPPEN HERE?
             transfer.perform();
-            componentTransferPhase.put(transfer, TransferPhase.PERFORM_ENDED);
+
 
             acquire_semaphore(transferOperation); // Acquire the mutex.
 
@@ -233,7 +226,6 @@ public class StorageSystemImplementation implements StorageSystem {
 
             componentPlacement.put(component, destination);
             isComponentTransferred.put(component, false);
-            componentTransferPhase.remove(transfer);
 
             transferOperation.release(); // Release the mutex.
 
@@ -344,4 +336,38 @@ public class StorageSystemImplementation implements StorageSystem {
             return TransferType.MOVE;
         }
     }
+
+    private class suggestedTEMP { // TODO: Review Copilot suggestion for updating maps instead of repeating code.
+
+        private void updateMapsAfterTransfer(ComponentTransfer transfer, TransferType transferType) {
+        ComponentId component = transfer.getComponentId();
+        DeviceId source = transfer.getSourceDeviceId();
+        DeviceId destination = transfer.getDestinationDeviceId();
+
+        switch (transferType) {
+            case ADD:
+                // Update data structures for ADD transfer
+                componentPlacement.put(component, destination);
+                deviceTakenSlots.get(destination).incrementAndGet();
+                break;
+            case REMOVE:
+                // Update data structures for REMOVE transfer
+                componentPlacement.remove(component);
+                deviceTakenSlots.get(source).decrementAndGet();
+                break;
+            case MOVE:
+                // Update data structures for MOVE transfer
+                componentPlacement.remove(component);
+                deviceTakenSlots.get(source).decrementAndGet();
+                componentPlacement.put(component, destination);
+                deviceTakenSlots.get(destination).incrementAndGet();
+                break;
+        }
+
+        // Common updates for all transfer types
+        isComponentTransferred.put(component, false);
+    }
+
+    }
+
 }
