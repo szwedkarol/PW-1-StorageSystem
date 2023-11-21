@@ -150,23 +150,23 @@ public class StorageSystemImplementation implements StorageSystem {
 
         // Check if component exists on the destination device.
         ComponentId component = transfer.getComponentId();
-        if (transferType == TransferType.ADD && componentPlacement.get(component) == destination) {
-            assert destination != null; // TransferType must be ADD
+        if (transferType == TransferType.ADD && destination != null && componentPlacement.get(component) != null) {
             throw new ComponentAlreadyExists(component, destination);
         }
 
         // Check if component is moved from device to the same device.
-        if (transferType == TransferType.MOVE && source == destination) {
-            assert source != null; // TransferType must be MOVE
+        if (transferType == TransferType.MOVE && source != null && destination != null && source.compareTo(destination) == 0) {
             throw new ComponentDoesNotNeedTransfer(component, source);
         }
 
         // Check if component exists on the source device for MOVE or REMOVE operations.
         if ((transferType == TransferType.MOVE || transferType == TransferType.REMOVE)
-                && componentPlacement.get(component) != source) {
-            assert source != null; // TransferType must be MOVE or REMOVE
+                && source != null && componentPlacement.get(component).compareTo(source) != 0) {
             throw new ComponentDoesNotExist(component, source);
         }
+
+        if (!isComponentTransferred.containsKey(component))
+            isComponentTransferred.put(component, false);
 
         // Check if component is already being transferred.
         if (isComponentTransferred.get(component)) {
@@ -333,6 +333,8 @@ public class StorageSystemImplementation implements StorageSystem {
      * and transferPhaseLatches maps as a side effect.
      */
     private synchronized void modifyMapsAfterPrepare(ComponentTransfer transfer) {
+        acquire_semaphore(transferOperation);
+
         TransferType transferType = assignTransferType(transfer);
         ComponentId componentId = transfer.getComponentId();
         DeviceId source = transfer.getSourceDeviceId();
@@ -347,6 +349,8 @@ public class StorageSystemImplementation implements StorageSystem {
                 transferPhaseLatches.get(whoWaitsForMe).get(TransferPhase.PERFORM).countDown();
             }
         }
+
+        transferOperation.release();
     }
 
     /*
@@ -362,6 +366,8 @@ public class StorageSystemImplementation implements StorageSystem {
      * isComponentTransferred, waitsFor, and transferPhaseLatches maps as a side effect.
      */
     private synchronized void modifyMapsAfterPerform(ComponentTransfer transfer) {
+        acquire_semaphore(transferOperation);
+
         TransferType transferType = assignTransferType(transfer);
         ComponentId componentId = transfer.getComponentId();
         DeviceId destination = transfer.getDestinationDeviceId();
@@ -376,6 +382,11 @@ public class StorageSystemImplementation implements StorageSystem {
         isComponentTransferred.put(componentId, false);
         waitsFor.remove(transfer);
         transferPhaseLatches.remove(transfer);
+
+        if (transferType == TransferType.REMOVE)
+            isComponentTransferred.remove(componentId);
+
+        transferOperation.release();
     }
 
 }

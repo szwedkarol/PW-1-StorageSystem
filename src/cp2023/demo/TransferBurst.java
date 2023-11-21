@@ -25,6 +25,8 @@ public final class TransferBurst {
         StorageSystem system = setupSystem();
         Collection<Thread> users = setupTransferers(system);
         runTransferers(users);
+
+        System.out.println("Udało się!!!");
     }
 
     private final static StorageSystem setupSystem() {
