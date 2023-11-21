@@ -4,6 +4,7 @@ import cp2023.base.*;
 
 import java.util.HashMap;
 import java.util.LinkedList;
+import java.util.Map;
 
 public class TransfersGraph {
 
@@ -16,7 +17,7 @@ public class TransfersGraph {
      */
     public class DeviceNode {
         private final DeviceId device;
-        private HashMap<ComponentTransfer, DeviceNode> outgoingEdges;
+        private final HashMap<ComponentTransfer, DeviceNode> outgoingEdges;
 
         public DeviceNode(DeviceId device) {
             assert device != null;
@@ -76,13 +77,27 @@ public class TransfersGraph {
      * FUNCTION: Checks if there is a cycle in the graph of transfers. Uses DFS algorithm.
      * OUTPUT: List of transfers that form a cycle. If there is no cycle, returns empty list.
      */
-    public LinkedList<ComponentTransfer> cycleOfTransfers(ComponentTransfer transfer) {
+    public synchronized LinkedList<ComponentTransfer> cycleOfTransfers(ComponentTransfer transfer) {
         LinkedList<ComponentTransfer> cycleOfTransfers = new LinkedList<>();
         LinkedList<DeviceNode> cycleOfNodes = new LinkedList<>();
         DeviceNode startingNode = graph.get(transfer.getSourceDeviceId());
 
         if (dfs(startingNode, cycleOfNodes)) {
-            // TODO: Implement creation of cycleOfTransfers list out of cycleOfNodes list.
+            // Iterate over the cycleOfNodes list
+            for (int i = 0; i < cycleOfNodes.size(); i++) {
+                // Get the current node and the next node (wrapping around to the first node if at the end)
+                DeviceNode currentNode = cycleOfNodes.get(i);
+                DeviceNode nextNode = cycleOfNodes.get((i + 1) % cycleOfNodes.size());
+
+                // Find the transfer from currentNode to nextNode
+                for (Map.Entry<ComponentTransfer, DeviceNode> entry : currentNode.getOutgoingEdges().entrySet()) {
+                    if (entry.getValue().equals(nextNode)) {
+                        // Add the transfer to the cycleOfTransfers list
+                        cycleOfTransfers.add(entry.getKey());
+                        break;
+                    }
+                }
+            }
 
             return cycleOfTransfers;
         } else {
@@ -106,12 +121,11 @@ public class TransfersGraph {
             DeviceNode node = stack.pop();
 
             if (visited.getOrDefault(node, false)) {
-                DeviceNode cycleStart = node;
                 DeviceNode current = node;
                 do {
                     deviceNodesCycle.addFirst(current);
                     current = parent.get(current);
-                } while (!current.equals(cycleStart));
+                } while (!current.equals(node));
                 return true;
             }
 

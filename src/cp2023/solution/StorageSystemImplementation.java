@@ -16,7 +16,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import cp2023.base.*;
 import cp2023.exceptions.*;
-import cp2023.solution.TransfersGraph;
 
 public class StorageSystemImplementation implements StorageSystem {
 
@@ -36,20 +35,20 @@ public class StorageSystemImplementation implements StorageSystem {
     private final Semaphore transferOperation = new Semaphore(1, true);
 
     private final HashMap<DeviceId, Integer> deviceTotalSlots; // Capacity of each device.
-    private HashMap<ComponentId, DeviceId> componentPlacement; // Current placement of each component.
-    private ConcurrentHashMap<DeviceId, AtomicInteger> deviceTakenSlots; // Number of slots taken up by components on each device.
+    private final HashMap<ComponentId, DeviceId> componentPlacement; // Current placement of each component.
+    private final ConcurrentHashMap<DeviceId, AtomicInteger> deviceTakenSlots; // Number of slots taken up by components on each device.
 
     // Set of pairs (component, boolean) - true if component is transferred, false otherwise.
-    private HashMap<ComponentId, Boolean> isComponentTransferred;
+    private final HashMap<ComponentId, Boolean> isComponentTransferred;
 
-    private ConcurrentHashMap<ComponentTransfer, TransferPhase> componentTransferPhase; // Phase of each component transfer.
+    private final ConcurrentHashMap<ComponentTransfer, TransferPhase> componentTransferPhase; // Phase of each component transfer.
 
     // Queues for transfers waiting for space on each device.
-    private ConcurrentHashMap<DeviceId, ConcurrentLinkedQueue<ComponentTransfer>> deviceQueues;
+    private final ConcurrentHashMap<DeviceId, ConcurrentLinkedQueue<ComponentTransfer>> deviceQueues;
 
     // "You cannot call prepare() on the place being freed by transfer X and then call perform() on the place of transfer Y."
     // Key has to wait for transfer Value to finish its phases (prepare()/perform()).
-    private ConcurrentHashMap<ComponentTransfer, ComponentTransfer> waitsFor;
+    private final ConcurrentHashMap<ComponentTransfer, ComponentTransfer> waitsFor;
 
     /*
      * transferPhaseLatches hashmap will be updated when component transfer is inserted into the deviceQueue,
@@ -59,9 +58,9 @@ public class StorageSystemImplementation implements StorageSystem {
      * First latch is released, when component transfer can call prepare().
      * Second latch is release, when component transfer can call perform().
      */
-    private ConcurrentHashMap<ComponentTransfer, ArrayList<CountDownLatch>> transferPhaseLatches;
+    private final ConcurrentHashMap<ComponentTransfer, ArrayList<CountDownLatch>> transferPhaseLatches;
 
-    private TransfersGraph graph; // Directed graph of MOVE transfers.
+    private final TransfersGraph graph; // Directed graph of MOVE transfers.
 
 
     public StorageSystemImplementation(HashMap<DeviceId, Integer> deviceTotalSlots,
@@ -244,7 +243,7 @@ public class StorageSystemImplementation implements StorageSystem {
 
             if (!cycle.isEmpty()) {
                 // Update waitsFor map for all transfers in a cycle
-                //TODO: CALL
+                cycleTransfersWaitForUpdate(cycle);
 
                 // Call prepare() in all transfers in a cycle
                 for (ComponentTransfer cycle_transfer : cycle) {
@@ -264,7 +263,22 @@ public class StorageSystemImplementation implements StorageSystem {
 
         awaitLatch(transferPhaseLatches.get(transfer).get(0)); // waits on latch before calling prepare()
 
+        // Transfer waiting for us can call prepare()
+        ComponentTransfer whoWaitsForMe = waitsFor.get(transfer);
+        if (whoWaitsForMe != null) {
+            transferPhaseLatches.get(whoWaitsForMe).get(0).countDown();
+        }
+
         transfer.prepare();
+
+        // TODO: Update all maps after prepare()
+
+        // Transfer waiting for us can call perform()
+        if (whoWaitsForMe != null) {
+            transferPhaseLatches.get(whoWaitsForMe).get(1).countDown();
+        }
+
+
 
 
 
