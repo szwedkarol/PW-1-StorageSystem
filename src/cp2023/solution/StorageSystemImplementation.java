@@ -173,7 +173,7 @@ public class StorageSystemImplementation implements StorageSystem {
             throw new ComponentIsBeingOperatedOn(component);
         }
 
-        // Update isComponentTransferred map.
+        // Component transfer starts, when it is legal.
         isComponentTransferred.put(component, true);
 
         // End of checking the arguments of componentTransfer and basic legality of the operation on a component.
@@ -183,33 +183,21 @@ public class StorageSystemImplementation implements StorageSystem {
             ComponentTransfer transferWaitingForMe = deviceQueues.get(source).poll();
             if (transferWaitingForMe != null) waitsFor.put(transfer, transferWaitingForMe);
 
-            transferOperation.release(); // Release the mutex.
-
             if (transferWaitingForMe != null)
                 transferPhaseLatches.get(transferWaitingForMe).get(TransferPhase.PREPARE).countDown();
 
-            transfer.prepare();
+            transferOperation.release(); // Release the mutex.
 
-            if (transferWaitingForMe != null)
-                transferPhaseLatches.get(transferWaitingForMe).get(TransferPhase.PERFORM).countDown();
+            transfer.prepare();
+            modifyMapsAfterPrepare(transfer);
 
             transfer.perform();
-
-
-            acquire_semaphore(transferOperation); // Acquire the mutex.
-
-            // Component is removed from the system
-            componentPlacement.remove(component);
-            deviceTakenSlots.get(source).decrementAndGet(); // Decrement number of slots taken up by components.
-            isComponentTransferred.remove(component);
-
-            transferOperation.release(); // Release the mutex.
+            modifyMapsAfterPerform(transfer);
 
             return; // REMOVE transfer is finished.
         }
 
         // TODO: REMOVE AND ADD/MOVE program flows (when transfer does not have to wait in any queue) are very similar
-        // they can likely be put inside single 'if' statement (+ new method for updating maps)
 
         // If there is free space on the destination device, ADD/MOVE transfer starts.
         if (deviceTakenSlots.get(destination).get() < deviceTotalSlots.get(destination)) {
@@ -222,39 +210,22 @@ public class StorageSystemImplementation implements StorageSystem {
                 if (transferWaitingForMe != null) waitsFor.put(transfer, transferWaitingForMe);
             }
 
-            transferOperation.release(); // Release the mutex.
-
-
             if (transferWaitingForMe != null)
                 transferPhaseLatches.get(transferWaitingForMe).get(TransferPhase.PREPARE).countDown();
 
+            transferOperation.release(); // Release the mutex.
+
             transfer.prepare();
 
-            if (transferWaitingForMe != null)
-                transferPhaseLatches.get(transferWaitingForMe).get(TransferPhase.PERFORM).countDown();
+            modifyMapsAfterPrepare(transfer);
 
             transfer.perform();
-
-
-            acquire_semaphore(transferOperation); // Acquire the mutex.
-
-            if (transferType == TransferType.MOVE) {
-                // Update data structures for source device.
-                componentPlacement.remove(component);
-                deviceTakenSlots.get(source).decrementAndGet();
-            }
-
-            // Steps that are identical for MOVE and ADD
-
-            componentPlacement.put(component, destination);
-            isComponentTransferred.put(component, false);
-
-            transferOperation.release(); // Release the mutex.
+            modifyMapsAfterPerform(transfer);
 
             return; // ADD or MOVE transfer is finished - case of enough space on destination device.
         }
 
-        // Now we have to write code for executing transfer, when there is not enough space on the destination device
+        // Below is logic for executing transfer, when there is not enough space on the destination device
         // and transfer type is ADD/MOVE
 
         // Where transfers will wait on latches? Answer: just before they call prepare() and perform() respectively,
@@ -282,7 +253,7 @@ public class StorageSystemImplementation implements StorageSystem {
             }
         }
 
-        transferOperation.release();
+        transferOperation.release(); // release th mutex
 
         awaitLatch(transferPhaseLatches.get(transfer).get(TransferPhase.PREPARE)); // waits before calling prepare()
 

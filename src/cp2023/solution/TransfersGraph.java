@@ -69,7 +69,7 @@ public class TransfersGraph {
 
     public void removeEdge(ComponentTransfer transfer) {
         DeviceNode source = graph.get(transfer.getSourceDeviceId());
-        source.getOutgoingEdges().remove(transfer);
+        if (source != null) source.getOutgoingEdges().remove(transfer);
     }
 
     // TODO: Likely to not be needed outside of testing.
