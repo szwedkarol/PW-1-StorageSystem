@@ -27,6 +27,11 @@ public final class StorageSystemFactory {
             throw new IllegalArgumentException("Arguments cannot be null.");
         }
 
+        // Test to check if deviceTotalSlots is not empty.
+        if (deviceTotalSlots.isEmpty()) {
+            throw new IllegalArgumentException("deviceTotalSlots cannot be an empty map.");
+        }
+
         // Tests, if there are devices without number of slots provided.
         for (Map.Entry<DeviceId, Integer> entry : deviceTotalSlots.entrySet()) {
             if (entry.getKey() == null || entry.getValue() == null) {

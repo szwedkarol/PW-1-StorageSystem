@@ -1,3 +1,10 @@
+/*
+ * University of Warsaw
+ * Concurrent Programming Course 2023/2024
+ * Java Assignment
+ *
+ * Authors: Karol Szwed (ks430171@students.mimuw.edu.pl)
+ */
 package cp2023.solution;
 
 import cp2023.base.*;

@@ -277,16 +277,14 @@ public class StorageSystemImplementation implements StorageSystem {
                     assert transferPhaseLatches.containsKey(cycle_transfer);
 
                     // Transfer that starts the cycle calls countDown() on its own PREPARE latch.
-                    transferPhaseLatches.get(cycle_transfer).get(TransferPhase.PREPARE).countDown(); // Latch for prepare()
-
-                    // TODO: Does anything more need to happen here?
+                    transferPhaseLatches.get(cycle_transfer).get(TransferPhase.PREPARE).countDown();
                 }
             }
         }
 
         transferOperation.release();
 
-        awaitLatch(transferPhaseLatches.get(transfer).get(TransferPhase.PREPARE)); // waits on latch before calling prepare()
+        awaitLatch(transferPhaseLatches.get(transfer).get(TransferPhase.PREPARE)); // waits before calling prepare()
 
         // Transfer waiting for us can call prepare()
         ComponentTransfer whoWaitsForMe = waitsFor.get(transfer);
@@ -295,27 +293,13 @@ public class StorageSystemImplementation implements StorageSystem {
         }
 
         transfer.prepare();
+        modifyMapsAfterPrepare(transfer);
 
-        // TODO: Update all maps after prepare()
-
-        // Transfer waiting for us can call perform()
-        if (whoWaitsForMe != null) {
-            transferPhaseLatches.get(whoWaitsForMe).get(TransferPhase.PERFORM).countDown();
-        }
-
-        awaitLatch(transferPhaseLatches.get(transfer).get(TransferPhase.PERFORM)); // waits on latch before calling perform()
+        awaitLatch(transferPhaseLatches.get(transfer).get(TransferPhase.PERFORM)); // waits before calling perform()
 
         transfer.perform();
-
-        isComponentTransferred.put(component, false);
-
-        // TODO: What needs to happen now?
-
-
-
+        modifyMapsAfterPerform(transfer);
     } // End of execute()
-
-    // TODO: (Maybe) Create method for updating maps instead of copying code
 
     /*
      * INPUT: ArrayList of ComponentTransfer objects representing a cycle in the graph of transfers.
@@ -363,37 +347,64 @@ public class StorageSystemImplementation implements StorageSystem {
         }
     }
 
-    private class suggestedTEMP { // TODO: Review Copilot suggestion for updating maps instead of repeating code.
-
-        private void updateMapsAfterTransfer(ComponentTransfer transfer, TransferType transferType) {
-        ComponentId component = transfer.getComponentId();
+    /*
+     * INPUT: ComponentTransfer object which has just called prepare() method.
+     *
+     * FUNCTION: Updates the maps after the prepare() method of a ComponentTransfer is called.
+     * Depending on the type of the transfer (ADD, REMOVE, or MOVE), it updates the componentPlacement and
+     * deviceTakenSlots maps.
+     * For REMOVE and MOVE transfers, it removes the component from its source device in the componentPlacement map
+     * and decrements the count of taken slots on the source device in the deviceTakenSlots map.
+     * If there is a transfer waiting for the current transfer to finish, it allows the waiting transfer to call
+     * its perform() method by counting down its PERFORM latch.
+     *
+     * OUTPUT: No explicit output. Modifies the componentPlacement, deviceTakenSlots,
+     * and transferPhaseLatches maps as a side effect.
+     */
+    private synchronized void modifyMapsAfterPrepare(ComponentTransfer transfer) {
+        TransferType transferType = assignTransferType(transfer);
+        ComponentId componentId = transfer.getComponentId();
         DeviceId source = transfer.getSourceDeviceId();
-        DeviceId destination = transfer.getDestinationDeviceId();
 
-        switch (transferType) {
-            case ADD:
-                // Update data structures for ADD transfer
-                componentPlacement.put(component, destination);
-                deviceTakenSlots.get(destination).incrementAndGet();
-                break;
-            case REMOVE:
-                // Update data structures for REMOVE transfer
-                componentPlacement.remove(component);
-                deviceTakenSlots.get(source).decrementAndGet();
-                break;
-            case MOVE:
-                // Update data structures for MOVE transfer
-                componentPlacement.remove(component);
-                deviceTakenSlots.get(source).decrementAndGet();
-                componentPlacement.put(component, destination);
-                deviceTakenSlots.get(destination).incrementAndGet();
-                break;
+        if (transferType == TransferType.MOVE || transferType == TransferType.REMOVE) {
+            componentPlacement.remove(componentId);
+            deviceTakenSlots.get(source).decrementAndGet();
+
+            // Transfer waiting for us can call prepare()
+            ComponentTransfer whoWaitsForMe = waitsFor.get(transfer);
+            if (whoWaitsForMe != null) {
+                transferPhaseLatches.get(whoWaitsForMe).get(TransferPhase.PERFORM).countDown();
+            }
         }
-
-        // Common updates for all transfer types
-        isComponentTransferred.put(component, false);
     }
 
+    /*
+     * INPUT: ComponentTransfer object which has just called perform() method.
+     *
+     * FUNCTION: Updates the maps after the perform() method of a ComponentTransfer is called.
+     * Depending on the type of the transfer (ADD, MOVE), it updates the componentPlacement and deviceTakenSlots maps.
+     * For ADD and MOVE transfers, it adds the component to its destination device in the componentPlacement map and
+     * increments the count of taken slots on the destination device in the deviceTakenSlots map.
+     * If the transfer type is MOVE, it also removes the edge representing the transfer from the graph of transfers.
+     *
+     * OUTPUT: No explicit output. Modifies the componentPlacement, deviceTakenSlots,
+     * isComponentTransferred, waitsFor, and transferPhaseLatches maps as a side effect.
+     */
+    private synchronized void modifyMapsAfterPerform(ComponentTransfer transfer) {
+        TransferType transferType = assignTransferType(transfer);
+        ComponentId componentId = transfer.getComponentId();
+        DeviceId destination = transfer.getDestinationDeviceId();
+
+        if (transferType == TransferType.MOVE) graph.removeEdge(transfer);
+
+        if (transferType == TransferType.ADD || transferType == TransferType.MOVE) {
+            componentPlacement.put(componentId, destination);
+            deviceTakenSlots.get(destination).incrementAndGet();
+        }
+
+        isComponentTransferred.put(componentId, false);
+        waitsFor.remove(transfer);
+        transferPhaseLatches.remove(transfer);
     }
 
 }
