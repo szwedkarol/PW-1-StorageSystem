@@ -24,10 +24,16 @@ public class StorageSystemImplementation implements StorageSystem {
         ADD, REMOVE, MOVE
     }
 
+    // TODO: Likely deprecated - to be (safely) deleted
     // Enum for transfer phase - LEGAL/PREPARE_STARTS/PREPARE_ENDED/PERFORM_ENDED.
     public enum TransferPhase {
         // LEGAL - transfer did not throw any exceptions.
         LEGAL, PREPARE_STARTS, PREPARE_ENDED, PERFORM_ENDED
+    }
+
+    // TODO: Rename to TransferPhase after removing deprecated enum
+    public enum LatchPhase {
+        PREPARE, PERFORM
     }
 
     // Mutex for operating on a transfer.
@@ -54,11 +60,11 @@ public class StorageSystemImplementation implements StorageSystem {
      * transferPhaseLatches hashmap will be updated when component transfer is inserted into the deviceQueue,
      * so transfers that do not have to wait for free space on destination device will never be put into this hashmap.
      *
-     * ArrayList of latches for each ComponentTransfer will be of size 2.
-     * First latch is released, when component transfer can call prepare().
-     * Second latch is release, when component transfer can call perform().
+     * EnumMap of latches for each ComponentTransfer will be of size 2.
+     * PREPARE latch is released, when component transfer can call prepare().
+     * PERFORM latch is release, when component transfer can call perform().
      */
-    private final ConcurrentHashMap<ComponentTransfer, ArrayList<CountDownLatch>> transferPhaseLatches;
+    private final ConcurrentHashMap<ComponentTransfer, EnumMap<LatchPhase, CountDownLatch>> transferPhaseLatches;
 
     private final TransfersGraph graph; // Directed graph of MOVE transfers.
 
@@ -109,10 +115,17 @@ public class StorageSystemImplementation implements StorageSystem {
         }
     }
 
+    /*
+     * INPUT: ComponentTransfer object for which the latches need to be initialized.
+     * FUNCTION: Updates the 'transferPhaseLatches' map for the given transfer.
+     * It creates an EnumMap with two entries, one for each phase (PREPARE and PERFORM), and associates a new
+     * CountDownLatch with each phase. The CountDownLatch for each phase is initialized with a count of 1.
+     * OUTPUT: No explicit output. The function modifies the 'transferPhaseLatches' map as a side effect.
+     */
     private void init_transferPhaseLatch(ComponentTransfer transfer) {
-        ArrayList<CountDownLatch> latches = new ArrayList<>();
-        latches.add(0, new CountDownLatch(1)); // prepare() latch
-        latches.add(1, new CountDownLatch(1)); // perform latch
+        EnumMap<LatchPhase, CountDownLatch> latches = new EnumMap<>(LatchPhase.class);
+        latches.put(LatchPhase.PREPARE, new CountDownLatch(1));
+        latches.put(LatchPhase.PERFORM, new CountDownLatch(1));
 
         transferPhaseLatches.put(transfer, latches);
     }
@@ -250,7 +263,7 @@ public class StorageSystemImplementation implements StorageSystem {
                     // TODO: Transfer that is closing the cycle cannot wait on the latch as there may not be any
                     // other thread to wake him up
                     assert transferPhaseLatches.containsKey(cycle_transfer);
-                    transferPhaseLatches.get(cycle_transfer).get(0).countDown(); // Latch for prepare()
+                    transferPhaseLatches.get(cycle_transfer).get(LatchPhase.PREPARE).countDown(); // Latch for prepare()
 
                     // TODO: Finish program flow for cycles
                 }
@@ -261,12 +274,12 @@ public class StorageSystemImplementation implements StorageSystem {
 
         transferOperation.release();
 
-        awaitLatch(transferPhaseLatches.get(transfer).get(0)); // waits on latch before calling prepare()
+        awaitLatch(transferPhaseLatches.get(transfer).get(LatchPhase.PREPARE)); // waits on latch before calling prepare()
 
         // Transfer waiting for us can call prepare()
         ComponentTransfer whoWaitsForMe = waitsFor.get(transfer);
         if (whoWaitsForMe != null) {
-            transferPhaseLatches.get(whoWaitsForMe).get(0).countDown();
+            transferPhaseLatches.get(whoWaitsForMe).get(LatchPhase.PREPARE).countDown();
         }
 
         transfer.prepare();
@@ -275,17 +288,16 @@ public class StorageSystemImplementation implements StorageSystem {
 
         // Transfer waiting for us can call perform()
         if (whoWaitsForMe != null) {
-            transferPhaseLatches.get(whoWaitsForMe).get(1).countDown();
+            transferPhaseLatches.get(whoWaitsForMe).get(LatchPhase.PERFORM).countDown();
         }
 
-
-
-
-
+        awaitLatch(transferPhaseLatches.get(transfer).get(LatchPhase.PERFORM)); // waits on latch before calling perform()
 
 
 
     }
+
+    // TODO: (Maybe) Create method for updating maps instead of copying code
 
     /*
      * INPUT: ArrayList of ComponentTransfer objects representing a cycle in the graph of transfers.
