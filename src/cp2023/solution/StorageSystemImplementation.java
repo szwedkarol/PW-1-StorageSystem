@@ -134,73 +134,21 @@ public class StorageSystemImplementation implements StorageSystem {
 
         // Assign a transfer type.
         TransferType transferType = assignTransferType(transfer);
+        DeviceId destination = transfer.getDestinationDeviceId();
+        DeviceId source = transfer.getSourceDeviceId();
 
         acquire_semaphore(transferOperation); // Acquire the mutex.
 
-        // Check if source device exists.
-        DeviceId source = transfer.getSourceDeviceId();
-        if (source != null && !deviceTotalSlots.containsKey(source)) {
-            throw new DeviceDoesNotExist(source);
-        }
-
-        // Check if destination device exists.
-        DeviceId destination = transfer.getDestinationDeviceId();
-        if (destination != null && !deviceTotalSlots.containsKey(destination)) {
-            throw new DeviceDoesNotExist(destination);
-        }
-
-        // Check if component exists on the destination device.
-        ComponentId component = transfer.getComponentId();
-        if (transferType == TransferType.ADD && destination != null && componentPlacement.get(component) != null) {
-            throw new ComponentAlreadyExists(component, destination);
-        }
-
-        // Check if component is moved from device to the same device.
-        if (transferType == TransferType.MOVE && source != null && destination != null && source.compareTo(destination) == 0) {
-            throw new ComponentDoesNotNeedTransfer(component, source);
-        }
-
-        // Check if component exists on the source device for MOVE or REMOVE operations.
-        if ((transferType == TransferType.MOVE || transferType == TransferType.REMOVE)
-                && source != null && componentPlacement.get(component).compareTo(source) != 0) {
-            throw new ComponentDoesNotExist(component, source);
-        }
-
-        if (!isComponentTransferred.containsKey(component))
-            isComponentTransferred.put(component, false);
-
-        // Check if component is already being transferred.
-        if (isComponentTransferred.get(component)) {
-            throw new ComponentIsBeingOperatedOn(component);
-        }
-
-        // Component transfer starts, when it is legal.
-        isComponentTransferred.put(component, true);
-
-        // End of checking the arguments of componentTransfer and basic legality of the operation on a component.
+        checkIfTransferIsLegal(transfer);
 
         // REMOVE transfer if its legal, it is performed immediately. (It is always allowed.)
-        if (transferType == TransferType.REMOVE) {
-            lookForWaitingTransfers(transfer); // If waiting transfer is found, countDown() on its latch
-
-            transferOperation.release(); // Release the mutex.
-
-            transfer.prepare();
-            modifyMapsAfterPrepare(transfer);
-
-            transfer.perform();
-            modifyMapsAfterPerform(transfer);
-
-            return; // REMOVE transfer is finished.
-        }
-
-        // TODO: REMOVE AND ADD/MOVE program flows (when transfer does not have to wait in any queue) are very similar
-
+        // OR
         // If there is free space on the destination device, ADD/MOVE transfer starts.
-        if (deviceTakenSlots.get(destination).get() < deviceTotalSlots.get(destination)) {
-            deviceTakenSlots.get(destination).incrementAndGet(); // prevents race condition
+        if (transferType == TransferType.REMOVE || (deviceTakenSlots.get(destination).get() < deviceTotalSlots.get(destination)) ) {
+            if (destination != null)
+                deviceTakenSlots.get(destination).incrementAndGet(); // prevents race condition
 
-            if (transferType == TransferType.MOVE) {
+            if (source != null) {
                 lookForWaitingTransfers(transfer); // If waiting transfer is found, countDown() on its latch
             }
 
@@ -213,6 +161,7 @@ public class StorageSystemImplementation implements StorageSystem {
             modifyMapsAfterPerform(transfer);
 
             return; // ADD or MOVE transfer is finished - case of enough space on destination device.
+                    // REMOVE transfer is finished
         }
 
         // Below is logic for executing transfer, when there is not enough space on the destination device
@@ -320,6 +269,51 @@ public class StorageSystemImplementation implements StorageSystem {
         } else {
             return TransferType.MOVE;
         }
+    }
+
+    // All the checks for possible exceptions regarding executed transfer.
+    private void checkIfTransferIsLegal(ComponentTransfer transfer) throws TransferException {
+        TransferType transferType = assignTransferType(transfer);
+        DeviceId source = transfer.getSourceDeviceId();
+        DeviceId destination = transfer.getDestinationDeviceId();
+
+        // Check if source device exists.
+        if (source != null && !deviceTotalSlots.containsKey(source)) {
+            throw new DeviceDoesNotExist(source);
+        }
+
+        // Check if destination device exists.
+        if (destination != null && !deviceTotalSlots.containsKey(destination)) {
+            throw new DeviceDoesNotExist(destination);
+        }
+
+        // Check if component exists on the destination device.
+        ComponentId component = transfer.getComponentId();
+        if (transferType == TransferType.ADD && destination != null && componentPlacement.get(component) != null) {
+            throw new ComponentAlreadyExists(component, destination);
+        }
+
+        // Check if component is moved from device to the same device.
+        if (transferType == TransferType.MOVE && source != null && destination != null && source.compareTo(destination) == 0) {
+            throw new ComponentDoesNotNeedTransfer(component, source);
+        }
+
+        // Check if component exists on the source device for MOVE or REMOVE operations.
+        if ((transferType == TransferType.MOVE || transferType == TransferType.REMOVE)
+                && source != null && componentPlacement.get(component).compareTo(source) != 0) {
+            throw new ComponentDoesNotExist(component, source);
+        }
+
+        if (!isComponentTransferred.containsKey(component))
+            isComponentTransferred.put(component, false);
+
+        // Check if component is already being transferred.
+        if (isComponentTransferred.get(component)) {
+            throw new ComponentIsBeingOperatedOn(component);
+        }
+
+        // Component transfer starts, when it is legal.
+        isComponentTransferred.put(component, true);
     }
 
     /*
