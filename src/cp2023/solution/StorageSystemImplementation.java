@@ -253,7 +253,7 @@ public class StorageSystemImplementation implements StorageSystem {
             }
         }
 
-        transferOperation.release(); // release th mutex
+        transferOperation.release(); // release the mutex
 
         awaitLatch(transferPhaseLatches.get(transfer).get(TransferPhase.PREPARE)); // waits before calling prepare()
 
