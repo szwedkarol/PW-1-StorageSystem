@@ -144,7 +144,8 @@ public class StorageSystemImplementation implements StorageSystem {
         // REMOVE transfer if its legal, it is performed immediately. (It is always allowed.)
         // OR
         // If there is free space on the destination device, ADD/MOVE transfer starts.
-        if (transferType == TransferType.REMOVE || (deviceTakenSlots.get(destination).get() < deviceTotalSlots.get(destination)) ) {
+        if (transferType == TransferType.REMOVE ||
+                (deviceTakenSlots.get(destination).get() < deviceTotalSlots.get(destination)) ) {
             if (destination != null)
                 deviceTakenSlots.get(destination).incrementAndGet(); // prevents race condition
 
@@ -171,25 +172,10 @@ public class StorageSystemImplementation implements StorageSystem {
         init_transferPhaseLatch(transfer); // Initialize latches for transfer
         deviceQueues.get(destination).add(transfer); // Add transfer to the waiting queue of the destination device
 
-        // Program logic for MOVE transfers that have to wait in the queue
+        // MOVE transfers that are waiting in the deviceQueue look for a cycle
         if (transferType == TransferType.MOVE) {
-            graph.addEdge(transfer);
-
-            // Look for a cycle withing graph of transfers.
-            ArrayList<ComponentTransfer> cycle = new ArrayList<>(graph.cycleOfTransfers(transfer));
-
-            if (!cycle.isEmpty()) {
-                // Update waitsFor map for all transfers in a cycle
-                cycleTransfersWaitForUpdate(cycle);
-
-                // Call prepare() in all transfers in a cycle
-                for (ComponentTransfer cycle_transfer : cycle) {
-                    assert transferPhaseLatches.containsKey(cycle_transfer);
-
-                    // Transfer that starts the cycle calls countDown() on its own PREPARE latch.
-                    transferPhaseLatches.get(cycle_transfer).get(TransferPhase.PREPARE).countDown();
-                }
-            }
+            // Modifies graph and if cycle is found, countDown() all PREPARE latches for transfers inside the cycle.
+            lookForCycle(transfer);
         }
 
         transferOperation.release(); // release the mutex
@@ -242,6 +228,7 @@ public class StorageSystemImplementation implements StorageSystem {
         }
     }
 
+    // Look for transfer inside source device queue and then if found, countDown() its PREPARE latch.
     private void lookForWaitingTransfers(ComponentTransfer transfer) {
         DeviceId source = transfer.getSourceDeviceId();
 
@@ -250,6 +237,27 @@ public class StorageSystemImplementation implements StorageSystem {
         if (whoWaitsForMe != null) {
             waitsFor.put(transfer, whoWaitsForMe);
             transferPhaseLatches.get(whoWaitsForMe).get(TransferPhase.PREPARE).countDown();
+        }
+    }
+
+    // Looks for cycle and then if found, countDown() all PREPARE latches for transfers inside the cycle.
+    private void lookForCycle(ComponentTransfer transfer) {
+        graph.addEdge(transfer);
+
+        // Look for a cycle withing graph of transfers.
+        ArrayList<ComponentTransfer> cycle = new ArrayList<>(graph.cycleOfTransfers(transfer));
+
+        if (!cycle.isEmpty()) {
+            // Update waitsFor map for all transfers in a cycle
+            cycleTransfersWaitForUpdate(cycle);
+
+            // Call prepare() in all transfers in a cycle
+            for (ComponentTransfer cycle_transfer : cycle) {
+                assert transferPhaseLatches.containsKey(cycle_transfer);
+
+                // Transfer that starts the cycle calls countDown() on its own PREPARE latch.
+                transferPhaseLatches.get(cycle_transfer).get(TransferPhase.PREPARE).countDown();
+            }
         }
     }
 
