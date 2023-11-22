@@ -134,8 +134,8 @@ public class StorageSystemImplementation implements StorageSystem {
 
         // Assign a transfer type.
         TransferType transferType = assignTransferType(transfer);
-        DeviceId destination = transfer.getDestinationDeviceId();
         DeviceId source = transfer.getSourceDeviceId();
+        DeviceId destination = transfer.getDestinationDeviceId();
 
         acquire_semaphore(transferOperation); // Acquire the mutex.
 
@@ -178,6 +178,11 @@ public class StorageSystemImplementation implements StorageSystem {
             lookForCycle(transfer);
         }
 
+        // DEBUG
+        System.out.println("\nThread: " + Thread.currentThread().getId());
+        System.out.println(deviceQueues);
+        System.out.println(waitsFor + "\n");
+
         transferOperation.release(); // release the mutex
 
         awaitLatch(transferPhaseLatches.get(transfer).get(TransferPhase.PREPARE)); // waits before calling prepare()
@@ -213,10 +218,12 @@ public class StorageSystemImplementation implements StorageSystem {
 
             // Get the next transfer in the cycle, wrap around to the first element if at the end
             ComponentTransfer nextTransfer = cycle.get((i + 1) % cycleSize);
-            waitsFor.put(currentTransfer, nextTransfer);
+            assert !waitsFor.containsKey(nextTransfer);
+            waitsFor.put(nextTransfer, currentTransfer);
+            // TODO: Check if inside cycleTransfersWaitForUpdate there is a correct order of transfers that are put in the map.
         }
     }
-    // TODO: Check if inside cycleTransfersWaitForUpdate there is a correct order of transfers that are put in the map.
+
 
     // latch.await() with exception handling.
     private void awaitLatch(CountDownLatch latch) {
@@ -235,6 +242,7 @@ public class StorageSystemImplementation implements StorageSystem {
         // Transfer waiting for us can call prepare()
         ComponentTransfer whoWaitsForMe = deviceQueues.get(source).poll();
         if (whoWaitsForMe != null) {
+            assert !waitsFor.containsKey(transfer);
             waitsFor.put(transfer, whoWaitsForMe);
             transferPhaseLatches.get(whoWaitsForMe).get(TransferPhase.PREPARE).countDown();
         }
@@ -341,11 +349,10 @@ public class StorageSystemImplementation implements StorageSystem {
     private void modifyMapsAfterPrepare(ComponentTransfer transfer) {
         acquire_semaphore(transferOperation);
 
-        TransferType transferType = assignTransferType(transfer);
         ComponentId componentId = transfer.getComponentId();
         DeviceId source = transfer.getSourceDeviceId();
 
-        if (transferType == TransferType.MOVE || transferType == TransferType.REMOVE) {
+        if (source != null) {
             componentPlacement.remove(componentId);
             deviceTakenSlots.get(source).decrementAndGet();
 
@@ -380,7 +387,7 @@ public class StorageSystemImplementation implements StorageSystem {
 
         if (transferType == TransferType.MOVE) graph.removeEdge(transfer);
 
-        if (transferType == TransferType.ADD || transferType == TransferType.MOVE) {
+        if (destination != null) {
             componentPlacement.put(componentId, destination);
             deviceTakenSlots.get(destination).incrementAndGet();
         }
