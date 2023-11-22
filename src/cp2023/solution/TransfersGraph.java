@@ -11,7 +11,6 @@ import cp2023.base.*;
 
 import java.util.HashMap;
 import java.util.LinkedList;
-import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class TransfersGraph {
@@ -23,20 +22,16 @@ public class TransfersGraph {
      * Each node (device) contains a list of outgoing edges (transfers) that is transfers from this device to some other
      * device inside a graph.
      */
-    public class DeviceNode {
+    private class DeviceNode {
         private final DeviceId device;
         private final ConcurrentLinkedQueue<ComponentTransfer> outgoingEdges;
 
         public DeviceNode(DeviceId device) {
-            assert device != null;
             this.device = device;
             this.outgoingEdges = new ConcurrentLinkedQueue<>();
         }
 
         public void addEdge(ComponentTransfer transfer) {
-            assert transfer.getSourceDeviceId().compareTo(this.device) == 0; // Transfer must be from this device.
-            assert transfer.getDestinationDeviceId() != null; // Transfer must be MOVE.
-
             outgoingEdges.add(transfer);
         }
 
@@ -48,12 +43,7 @@ public class TransfersGraph {
             return outgoingEdges;
         }
 
-        public DeviceId getDevice() {
-            return device;
-        }
     }
-
-    // TODO: DeviceNode class should be private, but it is not possible to test it then.
 
     private final HashMap<DeviceId, DeviceNode> graph; // Graph of transfers.
 
@@ -74,11 +64,6 @@ public class TransfersGraph {
     public void removeEdge(ComponentTransfer transfer) {
         DeviceNode source = graph.get(transfer.getSourceDeviceId());
         if (source != null) source.getOutgoingEdges().remove(transfer);
-    }
-
-    // TODO: Likely to not be needed outside of testing.
-    public DeviceNode getDeviceNode(DeviceId device) {
-        return graph.get(device);
     }
 
     /*
@@ -161,5 +146,6 @@ public class TransfersGraph {
 
         return false;
     }
+
 
 }

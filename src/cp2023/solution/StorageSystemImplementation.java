@@ -166,9 +166,6 @@ public class StorageSystemImplementation implements StorageSystem {
                 deviceTakenSlots.get(destination).incrementAndGet(); // prevents race condition
 
             if (source != null) {
-                // DEBUG
-                System.out.println("\nThread: " + Thread.currentThread().getId());
-
                 lookForWaitingTransfers(transfer); // If waiting transfer is found, countDown() on its latch
             }
 
@@ -200,12 +197,6 @@ public class StorageSystemImplementation implements StorageSystem {
             // Modifies graph and if cycle is found, countDown() all PREPARE latches for transfers inside the cycle.
             lookForCycle(transfer);
         }
-
-        // DEBUG
-        System.out.println("\nThread: " + Thread.currentThread().getId());
-        System.out.println(deviceQueues);
-        System.out.println(waitsFor);
-        System.out.println(deviceTakenSlots.get(destination).get() + "\n");
 
         // Check transferStep of all transfers with a given source
         ComponentTransfer started = lookForStartedTransfers(destination);
@@ -254,9 +245,7 @@ public class StorageSystemImplementation implements StorageSystem {
 
             // Get the next transfer in the cycle, wrap around to the first element if at the end
             ComponentTransfer nextTransfer = cycle.get((i + 1) % cycleSize);
-            assert !waitsFor.containsKey(nextTransfer); // TODO: Wywal
             waitsFor.put(nextTransfer, currentTransfer);
-            // TODO: Check if inside cycleTransfersWaitForUpdate there is a correct order of transfers that are put in the map.
         }
     }
 
@@ -295,7 +284,6 @@ public class StorageSystemImplementation implements StorageSystem {
         // Transfer waiting for us can call prepare()
         ComponentTransfer whoWaitsForMe = deviceQueues.get(source).poll();
         if (whoWaitsForMe != null) {
-            assert !waitsFor.containsKey(transfer); // TODO: Wywal
             waitsFor.put(transfer, whoWaitsForMe);
             transferPhaseLatches.get(whoWaitsForMe).get(LatchPhase.PREPARE).countDown();
         }
@@ -314,8 +302,6 @@ public class StorageSystemImplementation implements StorageSystem {
 
             // Call prepare() in all transfers in a cycle
             for (ComponentTransfer cycle_transfer : cycle) {
-                assert transferPhaseLatches.containsKey(cycle_transfer); // TODO: Wywal
-
                 // Transfer that starts the cycle calls countDown() on its own PREPARE latch.
                 transferPhaseLatches.get(cycle_transfer).get(LatchPhase.PREPARE).countDown();
             }
@@ -437,18 +423,7 @@ public class StorageSystemImplementation implements StorageSystem {
 
         TransferType transferType = assignTransferType(transfer);
         ComponentId componentId = transfer.getComponentId();
-        DeviceId source = transfer.getSourceDeviceId();
         DeviceId destination = transfer.getDestinationDeviceId();
-
-
-        // TODO: BODGE - to be thrown out
-        /*if (source != null && deviceTakenSlots.get(source).get() < deviceTotalSlots.get(source)) {
-            ComponentTransfer waitingTransfer = deviceQueues.get(source).poll();
-            if (waitingTransfer != null) {
-                transferPhaseLatches.get(waitingTransfer).get(LatchPhase.PREPARE).countDown();
-                transferPhaseLatches.get(waitingTransfer).get(LatchPhase.PERFORM).countDown();
-            }
-        }*/
 
         if (transferType == TransferType.MOVE) graph.removeEdge(transfer);
 
@@ -468,6 +443,3 @@ public class StorageSystemImplementation implements StorageSystem {
     }
 
 }
-
-
-// TODO: Wywal assert
