@@ -84,7 +84,7 @@ public class TransfersGraph {
      * FUNCTION: Checks if there is a cycle in the graph of transfers. Uses DFS algorithm.
      * OUTPUT: List of transfers that form a cycle. If there is no cycle, returns empty list.
      */
-    public synchronized LinkedList<ComponentTransfer> cycleOfTransfers(ComponentTransfer transfer) {
+    public LinkedList<ComponentTransfer> cycleOfTransfers(ComponentTransfer transfer) {
         LinkedList<ComponentTransfer> cycleOfTransfers = new LinkedList<>();
         LinkedList<DeviceNode> cycleOfNodes = new LinkedList<>();
         DeviceNode startingNode = graph.get(transfer.getSourceDeviceId());

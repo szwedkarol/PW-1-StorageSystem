@@ -207,6 +207,14 @@ public class StorageSystemImplementation implements StorageSystem {
         System.out.println(waitsFor);
         System.out.println(deviceTakenSlots.get(destination).get() + "\n");
 
+        // Check transferStep of all transfers with a given source
+        ComponentTransfer started = lookForStartedTransfers(destination);
+        if (started != null) {
+            deviceQueues.get(destination).remove(transfer);
+            waitsFor.put(started, transfer);
+            transferPhaseLatches.get(transfer).get(LatchPhase.PREPARE).countDown();
+        }
+
         transferOperation.release(); // release the mutex
 
         awaitLatch(transferPhaseLatches.get(transfer).get(LatchPhase.PREPARE)); // waits before calling prepare()
@@ -217,12 +225,15 @@ public class StorageSystemImplementation implements StorageSystem {
             transferOperation.release();
         }
 
+        transferStep.put(transfer, TransferStep.STARTED);
         transfer.prepare();
+        transferStep.put(transfer, TransferStep.ENDED_PREPARE);
         modifyMapsAfterPrepare(transfer);
 
         awaitLatch(transferPhaseLatches.get(transfer).get(LatchPhase.PERFORM)); // waits before calling perform()
 
         transfer.perform();
+        transferStep.put(transfer, TransferStep.ENDED_PERFORM);
         modifyMapsAfterPerform(transfer);
     } // End of execute()
 
@@ -247,6 +258,23 @@ public class StorageSystemImplementation implements StorageSystem {
             waitsFor.put(nextTransfer, currentTransfer);
             // TODO: Check if inside cycleTransfersWaitForUpdate there is a correct order of transfers that are put in the map.
         }
+    }
+
+    private ComponentTransfer lookForStartedTransfers(DeviceId source) {
+        for (Map.Entry<ComponentTransfer, TransferStep> entry : transferStep.entrySet()) {
+            ComponentTransfer transfer = entry.getKey();
+            if (transfer.getSourceDeviceId() != null) {
+                TransferStep step = entry.getValue();
+
+                if (transfer.getSourceDeviceId().equals(source) &&
+                        (step == TransferStep.STARTED ||
+                                step == TransferStep.ENDED_PREPARE || step == TransferStep.ENDED_PERFORM) &&
+                        !waitsFor.containsKey(transfer)) {
+                    return transfer;
+                }
+            }
+        }
+        return null;
     }
 
 
@@ -404,7 +432,7 @@ public class StorageSystemImplementation implements StorageSystem {
      * OUTPUT: No explicit output. Modifies the componentPlacement, deviceTakenSlots,
      * isComponentTransferred, waitsFor, and transferPhaseLatches maps as a side effect.
      */
-    private synchronized void modifyMapsAfterPerform(ComponentTransfer transfer) {
+    private void modifyMapsAfterPerform(ComponentTransfer transfer) {
         acquire_semaphore(transferOperation);
 
         TransferType transferType = assignTransferType(transfer);
