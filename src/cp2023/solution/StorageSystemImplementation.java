@@ -441,14 +441,14 @@ public class StorageSystemImplementation implements StorageSystem {
         DeviceId destination = transfer.getDestinationDeviceId();
 
 
-        // TODO: BODGE
-        if (source != null && deviceTakenSlots.get(source).get() < deviceTotalSlots.get(source)) {
+        // TODO: BODGE - to be thrown out
+        /*if (source != null && deviceTakenSlots.get(source).get() < deviceTotalSlots.get(source)) {
             ComponentTransfer waitingTransfer = deviceQueues.get(source).poll();
             if (waitingTransfer != null) {
                 transferPhaseLatches.get(waitingTransfer).get(LatchPhase.PREPARE).countDown();
                 transferPhaseLatches.get(waitingTransfer).get(LatchPhase.PERFORM).countDown();
             }
-        }
+        }*/
 
         if (transferType == TransferType.MOVE) graph.removeEdge(transfer);
 
