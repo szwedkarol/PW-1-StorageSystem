@@ -48,7 +48,8 @@ public class StorageSystemImplementation implements StorageSystem {
     private final ConcurrentHashMap<DeviceId, ConcurrentLinkedQueue<ComponentTransfer>> deviceQueues;
 
     // "You cannot call prepare() on the place being freed by transfer X and then call perform() on the place of transfer Y."
-    // Key has to wait for transfer Value to finish its phases (prepare()/perform()).
+    // Value has to wait for Key to finish its phases (prepare()/perform()).
+    // <whoHasToAct, whoHasToWait>
     private final ConcurrentHashMap<ComponentTransfer, ComponentTransfer> waitsFor;
 
     /*
@@ -180,11 +181,7 @@ public class StorageSystemImplementation implements StorageSystem {
 
         // REMOVE transfer if its legal, it is performed immediately. (It is always allowed.)
         if (transferType == TransferType.REMOVE) {
-            ComponentTransfer transferWaitingForMe = deviceQueues.get(source).poll();
-            if (transferWaitingForMe != null) waitsFor.put(transfer, transferWaitingForMe);
-
-            if (transferWaitingForMe != null)
-                transferPhaseLatches.get(transferWaitingForMe).get(TransferPhase.PREPARE).countDown();
+            lookForWaitingTransfers(transfer); // If waiting transfer is found, countDown() on its latch
 
             transferOperation.release(); // Release the mutex.
 
@@ -203,20 +200,13 @@ public class StorageSystemImplementation implements StorageSystem {
         if (deviceTakenSlots.get(destination).get() < deviceTotalSlots.get(destination)) {
             deviceTakenSlots.get(destination).incrementAndGet(); // prevents race condition
 
-            ComponentTransfer transferWaitingForMe = null;
             if (transferType == TransferType.MOVE) {
-                // We are freeing space on source device, so transfer waiting in the queue may start.
-                transferWaitingForMe = deviceQueues.get(source).poll();
-                if (transferWaitingForMe != null) waitsFor.put(transfer, transferWaitingForMe);
+                lookForWaitingTransfers(transfer); // If waiting transfer is found, countDown() on its latch
             }
-
-            if (transferWaitingForMe != null)
-                transferPhaseLatches.get(transferWaitingForMe).get(TransferPhase.PREPARE).countDown();
 
             transferOperation.release(); // Release the mutex.
 
             transfer.prepare();
-
             modifyMapsAfterPrepare(transfer);
 
             transfer.perform();
@@ -257,10 +247,12 @@ public class StorageSystemImplementation implements StorageSystem {
 
         awaitLatch(transferPhaseLatches.get(transfer).get(TransferPhase.PREPARE)); // waits before calling prepare()
 
-        // Transfer waiting for us can call prepare()
-        ComponentTransfer whoWaitsForMe = waitsFor.get(transfer);
-        if (whoWaitsForMe != null) {
-            transferPhaseLatches.get(whoWaitsForMe).get(TransferPhase.PREPARE).countDown();
+        // TODO: Is it possible inside waitsFor there will be two pairs:
+        // <t1, t_waiting> and <t2, t_waiting>?
+        if (transferType == TransferType.MOVE) {
+            acquire_semaphore(transferOperation);
+            lookForWaitingTransfers(transfer); // If waiting transfer is found, countDown() on latch
+            transferOperation.release();
         }
 
         transfer.prepare();
@@ -289,6 +281,7 @@ public class StorageSystemImplementation implements StorageSystem {
             waitsFor.put(currentTransfer, nextTransfer);
         }
     }
+    // TODO: Check if inside cycleTransfersWaitForUpdate there is a correct order of transfers that are put in the map.
 
     // latch.await() with exception handling.
     private void awaitLatch(CountDownLatch latch) {
@@ -297,6 +290,17 @@ public class StorageSystemImplementation implements StorageSystem {
         } catch (InterruptedException e) {
             // Exception thrown per project specification.
             throw new RuntimeException("panic: unexpected thread interruption");
+        }
+    }
+
+    private void lookForWaitingTransfers(ComponentTransfer transfer) {
+        DeviceId source = transfer.getSourceDeviceId();
+
+        // Transfer waiting for us can call prepare()
+        ComponentTransfer whoWaitsForMe = deviceQueues.get(source).poll();
+        if (whoWaitsForMe != null) {
+            waitsFor.put(transfer, whoWaitsForMe);
+            transferPhaseLatches.get(whoWaitsForMe).get(TransferPhase.PREPARE).countDown();
         }
     }
 
@@ -332,7 +336,7 @@ public class StorageSystemImplementation implements StorageSystem {
      * OUTPUT: No explicit output. Modifies the componentPlacement, deviceTakenSlots,
      * and transferPhaseLatches maps as a side effect.
      */
-    private synchronized void modifyMapsAfterPrepare(ComponentTransfer transfer) {
+    private void modifyMapsAfterPrepare(ComponentTransfer transfer) {
         acquire_semaphore(transferOperation);
 
         TransferType transferType = assignTransferType(transfer);
