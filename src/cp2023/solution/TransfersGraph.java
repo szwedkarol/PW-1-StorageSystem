@@ -12,6 +12,7 @@ import cp2023.base.*;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class TransfersGraph {
 
@@ -24,22 +25,26 @@ public class TransfersGraph {
      */
     public class DeviceNode {
         private final DeviceId device;
-        private final HashMap<ComponentTransfer, DeviceNode> outgoingEdges;
+        private final ConcurrentLinkedQueue<ComponentTransfer> outgoingEdges;
 
         public DeviceNode(DeviceId device) {
             assert device != null;
             this.device = device;
-            this.outgoingEdges = new HashMap<>();
+            this.outgoingEdges = new ConcurrentLinkedQueue<>();
         }
 
-        public void addEdge(ComponentTransfer transfer, DeviceNode destination) {
+        public void addEdge(ComponentTransfer transfer) {
             assert transfer.getSourceDeviceId().compareTo(this.device) == 0; // Transfer must be from this device.
             assert transfer.getDestinationDeviceId() != null; // Transfer must be MOVE.
 
-            outgoingEdges.put(transfer, destination);
+            outgoingEdges.add(transfer);
         }
 
-        public HashMap<ComponentTransfer, DeviceNode> getOutgoingEdges() {
+        public DeviceNode getEdgeDestination(ComponentTransfer transfer) {
+            return graph.get(transfer.getDestinationDeviceId());
+        }
+
+        public ConcurrentLinkedQueue<ComponentTransfer> getOutgoingEdges() {
             return outgoingEdges;
         }
 
@@ -63,8 +68,7 @@ public class TransfersGraph {
 
     public void addEdge(ComponentTransfer transfer) {
         DeviceNode source = graph.get(transfer.getSourceDeviceId());
-        DeviceNode destination = graph.get(transfer.getDestinationDeviceId());
-        source.addEdge(transfer, destination);
+        source.addEdge(transfer);
     }
 
     public void removeEdge(ComponentTransfer transfer) {
@@ -97,10 +101,10 @@ public class TransfersGraph {
                 DeviceNode nextNode = cycleOfNodes.get((i + 1) % cycleOfNodes.size());
 
                 // Find the transfer from currentNode to nextNode
-                for (Map.Entry<ComponentTransfer, DeviceNode> entry : currentNode.getOutgoingEdges().entrySet()) {
-                    if (entry.getValue().equals(nextNode)) {
+                for (ComponentTransfer edge : currentNode.getOutgoingEdges()) {
+                    if (currentNode.getEdgeDestination(edge).equals(nextNode)) {
                         // Add the transfer to the cycleOfTransfers list
-                        cycleOfTransfers.add(entry.getKey());
+                        cycleOfTransfers.add(edge);
                         break;
                     }
                 }
@@ -138,7 +142,8 @@ public class TransfersGraph {
 
             visited.put(node, true);
 
-            for (DeviceNode neighbor : node.getOutgoingEdges().values()) {
+            for (ComponentTransfer edge : node.getOutgoingEdges()) {
+                DeviceNode neighbor = node.getEdgeDestination(edge);
                 if (!visited.getOrDefault(neighbor, false)) {
                     parent.put(neighbor, node);
                     stack.push(neighbor);
