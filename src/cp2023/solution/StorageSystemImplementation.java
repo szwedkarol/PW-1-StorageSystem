@@ -29,8 +29,19 @@ public class StorageSystemImplementation implements StorageSystem {
      * PREPARE - transfer can call prepare().
      * PERFORM - transfer can call perform().
      */
-    public enum TransferPhase {
+    public enum LatchPhase {
         PREPARE, PERFORM
+    }
+
+    /*
+     * Enum for the current step of a transfer within the system.
+     * LEGAL: The transfer has been checked and is legal to proceed.
+     * STARTED: The transfer has started.
+     * ENDED_PREPARE: The transfer has ended its prepare phase.
+     * ENDED_PERFORM: The transfer has ended its perform phase.
+     */
+    public enum TransferStep {
+        LEGAL, STARTED, ENDED_PREPARE, ENDED_PERFORM
     }
 
     // Mutex for operating on a transfer and checking if it is legal.
@@ -60,7 +71,10 @@ public class StorageSystemImplementation implements StorageSystem {
      * PREPARE latch is released, when component transfer can call prepare().
      * PERFORM latch is release, when component transfer can call perform().
      */
-    private final ConcurrentHashMap<ComponentTransfer, EnumMap<TransferPhase, CountDownLatch>> transferPhaseLatches;
+    private final ConcurrentHashMap<ComponentTransfer, EnumMap<LatchPhase, CountDownLatch>> transferPhaseLatches;
+
+    // Current step of any transfer inside the system.
+    private final ConcurrentHashMap<ComponentTransfer, TransferStep> transferStep;
 
     private final TransfersGraph graph; // Directed graph of MOVE transfers.
 
@@ -71,6 +85,7 @@ public class StorageSystemImplementation implements StorageSystem {
         this.componentPlacement = componentPlacement;
         this.transferPhaseLatches = new ConcurrentHashMap<>();
         this.waitsFor = new ConcurrentHashMap<>();
+        this.transferStep = new ConcurrentHashMap<>();
 
         // Initialize isComponentTransferred map - at the beginning all components are not transferred.
         this.isComponentTransferred = new HashMap<>();
@@ -118,9 +133,9 @@ public class StorageSystemImplementation implements StorageSystem {
      * OUTPUT: No explicit output. The function modifies the 'transferPhaseLatches' map as a side effect.
      */
     private void init_transferPhaseLatch(ComponentTransfer transfer) {
-        EnumMap<TransferPhase, CountDownLatch> latches = new EnumMap<>(TransferPhase.class);
-        latches.put(TransferPhase.PREPARE, new CountDownLatch(1));
-        latches.put(TransferPhase.PERFORM, new CountDownLatch(1));
+        EnumMap<LatchPhase, CountDownLatch> latches = new EnumMap<>(LatchPhase.class);
+        latches.put(LatchPhase.PREPARE, new CountDownLatch(1));
+        latches.put(LatchPhase.PERFORM, new CountDownLatch(1));
 
         transferPhaseLatches.put(transfer, latches);
     }
@@ -140,6 +155,7 @@ public class StorageSystemImplementation implements StorageSystem {
         acquire_semaphore(transferOperation); // Acquire the mutex.
 
         checkIfTransferIsLegal(transfer);
+        transferStep.put(transfer, TransferStep.LEGAL);
 
         // REMOVE transfer if its legal, it is performed immediately. (It is always allowed.)
         // OR
@@ -156,12 +172,16 @@ public class StorageSystemImplementation implements StorageSystem {
                 lookForWaitingTransfers(transfer); // If waiting transfer is found, countDown() on its latch
             }
 
+            transferStep.put(transfer, TransferStep.STARTED);
+
             transferOperation.release(); // Release the mutex.
 
             transfer.prepare();
+            transferStep.put(transfer, TransferStep.ENDED_PREPARE);
             modifyMapsAfterPrepare(transfer);
 
             transfer.perform();
+            transferStep.put(transfer, TransferStep.ENDED_PERFORM);
             modifyMapsAfterPerform(transfer);
 
             return; // ADD or MOVE transfer is finished - case of enough space on destination device.
@@ -189,7 +209,7 @@ public class StorageSystemImplementation implements StorageSystem {
 
         transferOperation.release(); // release the mutex
 
-        awaitLatch(transferPhaseLatches.get(transfer).get(TransferPhase.PREPARE)); // waits before calling prepare()
+        awaitLatch(transferPhaseLatches.get(transfer).get(LatchPhase.PREPARE)); // waits before calling prepare()
 
         if (transferType == TransferType.MOVE) {
             acquire_semaphore(transferOperation);
@@ -200,7 +220,7 @@ public class StorageSystemImplementation implements StorageSystem {
         transfer.prepare();
         modifyMapsAfterPrepare(transfer);
 
-        awaitLatch(transferPhaseLatches.get(transfer).get(TransferPhase.PERFORM)); // waits before calling perform()
+        awaitLatch(transferPhaseLatches.get(transfer).get(LatchPhase.PERFORM)); // waits before calling perform()
 
         transfer.perform();
         modifyMapsAfterPerform(transfer);
@@ -247,9 +267,9 @@ public class StorageSystemImplementation implements StorageSystem {
         // Transfer waiting for us can call prepare()
         ComponentTransfer whoWaitsForMe = deviceQueues.get(source).poll();
         if (whoWaitsForMe != null) {
-            assert !waitsFor.containsKey(transfer); // TODO: Wywal przed wysłaniem
+            assert !waitsFor.containsKey(transfer); // TODO: Wywal
             waitsFor.put(transfer, whoWaitsForMe);
-            transferPhaseLatches.get(whoWaitsForMe).get(TransferPhase.PREPARE).countDown();
+            transferPhaseLatches.get(whoWaitsForMe).get(LatchPhase.PREPARE).countDown();
         }
     }
 
@@ -269,7 +289,7 @@ public class StorageSystemImplementation implements StorageSystem {
                 assert transferPhaseLatches.containsKey(cycle_transfer); // TODO: Wywal
 
                 // Transfer that starts the cycle calls countDown() on its own PREPARE latch.
-                transferPhaseLatches.get(cycle_transfer).get(TransferPhase.PREPARE).countDown();
+                transferPhaseLatches.get(cycle_transfer).get(LatchPhase.PREPARE).countDown();
             }
         }
     }
@@ -365,7 +385,7 @@ public class StorageSystemImplementation implements StorageSystem {
             // Transfer waiting for us can call prepare()
             ComponentTransfer whoWaitsForMe = waitsFor.get(transfer);
             if (whoWaitsForMe != null) {
-                transferPhaseLatches.get(whoWaitsForMe).get(TransferPhase.PERFORM).countDown();
+                transferPhaseLatches.get(whoWaitsForMe).get(LatchPhase.PERFORM).countDown();
             }
         }
 
@@ -397,8 +417,8 @@ public class StorageSystemImplementation implements StorageSystem {
         if (source != null && deviceTakenSlots.get(source).get() < deviceTotalSlots.get(source)) {
             ComponentTransfer waitingTransfer = deviceQueues.get(source).poll();
             if (waitingTransfer != null) {
-                transferPhaseLatches.get(waitingTransfer).get(TransferPhase.PREPARE).countDown();
-                transferPhaseLatches.get(waitingTransfer).get(TransferPhase.PERFORM).countDown();
+                transferPhaseLatches.get(waitingTransfer).get(LatchPhase.PREPARE).countDown();
+                transferPhaseLatches.get(waitingTransfer).get(LatchPhase.PERFORM).countDown();
             }
         }
 
@@ -411,6 +431,7 @@ public class StorageSystemImplementation implements StorageSystem {
         isComponentTransferred.put(componentId, false);
         waitsFor.remove(transfer);
         transferPhaseLatches.remove(transfer);
+        transferStep.remove(transfer);
 
         if (transferType == TransferType.REMOVE)
             isComponentTransferred.remove(componentId);

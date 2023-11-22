@@ -22,11 +22,11 @@ import cp2023.solution.StorageSystemFactory;
 public final class TransferBurst {
 
     public static void main(String[] args) {
-        StorageSystem system = setupSystem();
-        Collection<Thread> users = setupTransferers(system);
-        runTransferers(users);
+            StorageSystem system = setupSystem();
+            Collection<Thread> users = setupTransferers(system);
+            runTransferers(users);
 
-        System.out.println("Udało się!!!");
+            System.out.println("Udało się!!!");
     }
 
     private final static StorageSystem setupSystem() {
