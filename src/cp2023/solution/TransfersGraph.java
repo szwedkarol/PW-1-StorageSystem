@@ -33,7 +33,7 @@ public class TransfersGraph {
         }
 
         public void addEdge(ComponentTransfer transfer, DeviceNode destination) {
-            assert transfer.getSourceDeviceId() == this.device; // Transfer must be from this device.
+            assert transfer.getSourceDeviceId().compareTo(this.device) == 0; // Transfer must be from this device.
             assert transfer.getDestinationDeviceId() != null; // Transfer must be MOVE.
 
             outgoingEdges.put(transfer, destination);
@@ -132,7 +132,7 @@ public class TransfersGraph {
                 do {
                     deviceNodesCycle.addFirst(current);
                     current = parent.get(current);
-                } while (!current.equals(node));
+                } while (current != null && !current.equals(node));
                 return true;
             }
 

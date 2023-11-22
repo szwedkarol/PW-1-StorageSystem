@@ -213,10 +213,13 @@ public class StorageSystemImplementation implements StorageSystem {
      * The last transfer in the cycle waits for the first one, closing the cycle.
      * OUTPUT: No explicit output. The function modifies the 'waitsFor' map as a side effect.
      */
-    private void cycleTransfersWaitForUpdate(ArrayList<ComponentTransfer> cycle) {
+    private void cycleTransfers_waitsFor_Update(ArrayList<ComponentTransfer> cycle) {
         int cycleSize = cycle.size();
         for (int i = 0; i < cycleSize; i++) {
             ComponentTransfer currentTransfer = cycle.get(i);
+
+            // Remove transfer from the queue
+            deviceQueues.get(currentTransfer.getSourceDeviceId()).remove();
 
             // Get the next transfer in the cycle, wrap around to the first element if at the end
             ComponentTransfer nextTransfer = cycle.get((i + 1) % cycleSize);
@@ -259,7 +262,7 @@ public class StorageSystemImplementation implements StorageSystem {
 
         if (!cycle.isEmpty()) {
             // Update waitsFor map for all transfers in a cycle
-            cycleTransfersWaitForUpdate(cycle);
+            cycleTransfers_waitsFor_Update(cycle);
 
             // Call prepare() in all transfers in a cycle
             for (ComponentTransfer cycle_transfer : cycle) {
@@ -318,7 +321,8 @@ public class StorageSystemImplementation implements StorageSystem {
 
         // Check if component exists on the source device for MOVE or REMOVE operations.
         if ((transferType == TransferType.MOVE || transferType == TransferType.REMOVE)
-                && source != null && componentPlacement.get(component).compareTo(source) != 0) {
+                && source != null &&
+                (!componentPlacement.containsKey(component) || componentPlacement.get(component).compareTo(source) != 0) ) {
             throw new ComponentDoesNotExist(component, source);
         }
 
@@ -415,3 +419,6 @@ public class StorageSystemImplementation implements StorageSystem {
     }
 
 }
+
+
+// TODO: Wywal assert
